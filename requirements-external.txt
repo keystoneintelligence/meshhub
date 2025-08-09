@@ -1,0 +1,3 @@
+-e git+https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git@main#egg=hy3dgen
+custom_rasterizer @ git+https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git@main#subdirectory=hy3dgen/texgen/custom_rasterizer
+mesh-processor     @ git+https://github.com/Tencent-Hunyuan/Hunyuan3D-2.git@main#subdirectory=hy3dgen/texgen/differentiable_renderer

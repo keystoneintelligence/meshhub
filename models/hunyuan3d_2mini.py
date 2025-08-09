@@ -2,8 +2,11 @@ import os
 import torch
 from PIL import Image
 import trimesh
+from models.utils import remove_degenerate_face, reduce_face
 from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
+# from hy3dgen.texgen import Hunyuan3DPaintPipeline
+from pipelines.texgen_min_vram import LowVram3DPaintPipeline
 
 NUM_INFERENCE_STEPS = 25
 OCTREE_RESOLUTION   = 128
@@ -65,6 +68,7 @@ def generate_text_to_3d_hunyuan3d_2mini(prompt: str, output_path: str = None) ->
     return output_path
 
 def generate_image_to_3d_hunyuan3d_2mini(image_path: str, output_path: str = None) -> str:
+    #return "treasurechest_3d.glb"
     pipeline = _get_pipeline()
     img = Image.open(image_path).convert("RGBA")
     if img.mode == "RGB":
@@ -83,9 +87,57 @@ def generate_image_to_3d_hunyuan3d_2mini(image_path: str, output_path: str = Non
     )[0]
     mesh = _extract_mesh(raw)
 
+    mesh = remove_degenerate_face(mesh)
+    mesh = reduce_face(mesh)
+    #mesh = mesh.simplify_quadric_decimation(percent=0.99)
+
     if output_path is None:
         base = os.path.splitext(os.path.basename(image_path))[0]
         output_path = f"{base}_3d.glb"
     print(f"[DEBUG] Exporting mesh to {output_path}")
     mesh.export(output_path)
+
+    _free_mesh_pipeline()
+
     return output_path
+
+
+def apply_texture_to_model(model_path: str, texture_path: str) -> str:
+    print("DEBUG: starting texturing")
+
+    # load & prep the texture
+    img = Image.open(texture_path).convert("RGBA")
+    if img.mode == "RGB":
+        img = BackgroundRemover()(img)
+
+    # pipeline = Hunyuan3DPaintPipeline.from_pretrained(
+    #     'tencent/Hunyuan3D-2',
+    #     subfolder="hunyuan3d-paint-v2-0",
+    # )
+
+    pipeline = LowVram3DPaintPipeline.from_pretrained(
+        'tencent/Hunyuan3D-2',
+        subfolder="hunyuan3d-paint-v2-0",
+    )
+
+    mesh = trimesh.load(model_path)
+
+    mesh = pipeline(mesh, image=img)
+    output_fpath = model_path.replace('.glb', '_textured.glb')
+    mesh.export(output_fpath)
+    return output_fpath
+
+
+def _free_mesh_pipeline():
+    global _pipeline
+    if _pipeline is not None and torch.cuda.is_available():
+        # 1) move all params off of cuda
+        try:
+            _pipeline.to("cpu")
+        except Exception:
+            pass
+        # 2) delete it
+        del _pipeline
+        _pipeline = None
+        # 3) free any leftover cached memory
+        torch.cuda.empty_cache()
