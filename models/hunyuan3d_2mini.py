@@ -122,7 +122,15 @@ def apply_texture_to_model(model_path: str, texture_path: str) -> str:
 
     mesh = trimesh.load(model_path)
 
-    mesh = pipeline(mesh, image=img)
+    mesh, metadata = pipeline(mesh, image=img)
+
+    # Save everything into ./debug_run_001
+    paths = metadata.save("./debug_run_001")
+
+    print("Metadata JSON + images saved. Image file paths:")
+    for stage, files in paths.items():
+        print(stage, "->", files)
+
     output_fpath = model_path.replace('.glb', '_textured.glb')
     mesh.export(output_fpath)
     return output_fpath

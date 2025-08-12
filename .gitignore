@@ -5,3 +5,5 @@
 /output/*
 *api.key*
 *docs/*
+*.glb
+*.png
