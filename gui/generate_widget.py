@@ -1,3 +1,4 @@
+# generate_widget.py
 import os
 import shutil
 import logging
@@ -35,21 +36,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class GenerateWidget(QWidget):
     """
-    Hosts TWO viewers (orbit & editor) stacked by identical-size widgets.
-    Preserves camera pose when swapping. Avoids double placeholder.
+    Hosts an orbit viewer permanently and spawns a fresh editor viewer + Apply button
+    each time Edit Texture mode is entered. Both are destroyed on exit.
     """
     def __init__(self):
         super().__init__()
         self.last_model_path = None
 
-        layout = QVBoxLayout(self)
+        # --- Top-level layout ---
+        self._root_layout = QVBoxLayout(self)
 
         # Controls
-        layout.addWidget(QLabel("Mode:"))
+        self._root_layout.addWidget(QLabel("Mode:"))
         self.mode_selector = QComboBox()
         self.mode_selector.addItems(["Image to 3D", "Text to 3D"])
         self.mode_selector.currentTextChanged.connect(self._toggle_inputs)
-        layout.addWidget(self.mode_selector)
+        self._root_layout.addWidget(self.mode_selector)
 
         self.image_btn = QPushButton("Choose Image…")
         self.image_btn.clicked.connect(self._pick_image)
@@ -57,16 +59,16 @@ class GenerateWidget(QWidget):
         self.text_input = QLineEdit()
         self.text_input.setPlaceholderText("Enter a description…")
 
-        layout.addWidget(self.image_btn)
-        layout.addWidget(self.text_input)
+        self._root_layout.addWidget(self.image_btn)
+        self._root_layout.addWidget(self.text_input)
 
-        layout.addWidget(QLabel("Model:"))
+        self._root_layout.addWidget(QLabel("Model:"))
         self.model_selector = QComboBox()
-        layout.addWidget(self.model_selector)
+        self._root_layout.addWidget(self.model_selector)
 
-        layout.addWidget(QLabel("Texture Model:"))
+        self._root_layout.addWidget(QLabel("Texture Model:"))
         self.texture_selector = QComboBox()
-        layout.addWidget(self.texture_selector)
+        self._root_layout.addWidget(self.texture_selector)
 
         btn_layout = QHBoxLayout()
         self.generate_btn = QPushButton("Generate")
@@ -76,9 +78,9 @@ class GenerateWidget(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         btn_layout.addWidget(self.generate_btn)
         btn_layout.addWidget(self.export_btn)
-        layout.addLayout(btn_layout)
+        self._root_layout.addLayout(btn_layout)
 
-        layout.addWidget(QLabel("Preview:"))
+        self._root_layout.addWidget(QLabel("Preview:"))
 
         opts_layout = QHBoxLayout()
         self.chk_texture = QCheckBox("Show Texture")
@@ -87,40 +89,37 @@ class GenerateWidget(QWidget):
         self.chk_wire.setChecked(True)
         opts_layout.addWidget(self.chk_texture)
         opts_layout.addWidget(self.chk_wire)
-        layout.addLayout(opts_layout)
+        self._root_layout.addLayout(opts_layout)
 
         # Edit Texture controls
+        # Note: Apply button is created/destroyed dynamically in edit mode.
         edit_layout = QHBoxLayout()
         self.btn_edit_texture = QPushButton("Edit Texture")
         self.btn_edit_texture.setCheckable(True)
         self.btn_edit_texture.setEnabled(False)  # only when textured model is loaded
-        self.btn_apply_texture = QPushButton("Apply")
-        self.btn_apply_texture.setVisible(False)
         edit_layout.addWidget(self.btn_edit_texture)
-        edit_layout.addWidget(self.btn_apply_texture)
-        layout.addLayout(edit_layout)
+        self._root_layout.addLayout(edit_layout)
+        self._edit_controls_layout = edit_layout
+        self.btn_apply_texture = None  # created on-demand
 
         # ---- Viewers in a stacked widget ----
         self.viewer_orbit = OrbitViewer(self)
-        self.viewer_edit = TextureEditViewer(self)
+        self.viewer_edit = None  # created on-demand
 
         self.viewer_stack = QStackedWidget()
-        self.viewer_stack.addWidget(self.viewer_orbit)  # add the QWidget, not internals
-        self.viewer_stack.addWidget(self.viewer_edit)
+        self.viewer_stack.addWidget(self.viewer_orbit)  # page 0
         self.viewer_stack.setCurrentIndex(0)
-        layout.addWidget(self.viewer_stack, stretch=1)
+        self._root_layout.addWidget(self.viewer_stack, stretch=1)
 
         # Wire up UI to orbit viewer toggles
         self.chk_texture.toggled.connect(self.viewer_orbit.set_show_texture)
         self.chk_wire.toggled.connect(self.viewer_orbit.set_show_wireframe)
         self.btn_edit_texture.toggled.connect(self._on_toggle_edit_texture)
-        self.btn_apply_texture.clicked.connect(self._on_apply_texture)
 
         # Viewer -> UI
         self.viewer_orbit.modelLoaded.connect(self._on_model_loaded)
-        self.viewer_edit.editModeChanged.connect(self._on_edit_mode_changed)
 
-        # Init dropdowns + placeholder ONCE (prevents duplicate logs)
+        # Init dropdowns + placeholder once
         self._toggle_inputs(self.mode_selector.currentText())
         self.viewer_orbit.load_placeholder(reset=True)
 
@@ -177,35 +176,101 @@ class GenerateWidget(QWidget):
         else:
             self._switch_to_orbit(preserve_camera=True)
 
+    def _ensure_apply_button(self):
+        """Create the Apply button if it doesn't exist (edit mode only)."""
+        if self.btn_apply_texture is not None:
+            return
+        self.btn_apply_texture = QPushButton("Apply")
+        self.btn_apply_texture.clicked.connect(self._on_apply_texture)
+        self.btn_apply_texture.setVisible(True)
+        self._edit_controls_layout.addWidget(self.btn_apply_texture)
+
+    def _destroy_apply_button(self):
+        if self.btn_apply_texture is not None:
+            try:
+                self.btn_apply_texture.clicked.disconnect(self._on_apply_texture)
+            except Exception:
+                pass
+            self._edit_controls_layout.removeWidget(self.btn_apply_texture)
+            self.btn_apply_texture.deleteLater()
+            self.btn_apply_texture = None
+
     def _switch_to_editor(self):
+        # Only proceed if there's a textured mesh
         if not self.viewer_orbit.mesh or not self.viewer_orbit.current_has_texture():
             if self.btn_edit_texture.isChecked():
                 self.btn_edit_texture.setChecked(False)
             return
 
         cam_state = self.viewer_orbit.get_camera_state()
+
+        # Create a fresh editor viewer
+        self.viewer_edit = TextureEditViewer(self)
         self.viewer_edit.set_content(
             mesh=self.viewer_orbit.mesh,
             texture=self.viewer_orbit.texture,
             reset=False,
             keep_camera_state=cam_state
         )
+        # Optional: if TextureEditViewer emits editModeChanged, reflect Apply visibility
+        # but we build/destroy the Apply button ourselves regardless.
+        try:
+            self.viewer_edit.editModeChanged.connect(self._on_edit_mode_changed)
+        except Exception:
+            pass
+
         self.viewer_edit.enter_mode()
-        self.viewer_stack.setCurrentIndex(1)
+
+        # Insert into stack as a new page 1 and switch to it
+        self.viewer_stack.addWidget(self.viewer_edit)
+        self.viewer_stack.setCurrentWidget(self.viewer_edit)
+
+        # Build a fresh Apply button
+        self._ensure_apply_button()
+
+        # Disable orbit toggles during edit
         self.chk_wire.setEnabled(False)
         self.chk_texture.setEnabled(False)
 
     def _switch_to_orbit(self, preserve_camera: bool = True):
-        if self.viewer_edit.mesh is not None:
+        # Pull results/camera back from editor (if it exists), then destroy it
+        if self.viewer_edit is not None:
             cam_state = self.viewer_edit.get_camera_state() if preserve_camera else None
-            self.viewer_orbit.mesh = self.viewer_edit.mesh
-            self.viewer_orbit.texture = self.viewer_edit.texture
-            self.viewer_orbit._render_current(reset=False)
+
+            # Move any updated mesh/texture back to orbit viewer
+            if getattr(self.viewer_edit, "mesh", None) is not None:
+                self.viewer_orbit.mesh = self.viewer_edit.mesh
+                self.viewer_orbit.texture = self.viewer_edit.texture
+                self.viewer_orbit._render_current(reset=False)
+
             if cam_state:
                 self.viewer_orbit.set_camera_state(cam_state)
 
-        self.viewer_edit.exit_mode()
-        self.viewer_stack.setCurrentIndex(0)
+            # Cleanly exit and destroy editor viewer
+            try:
+                self.viewer_edit.exit_mode()
+            except Exception:
+                pass
+            try:
+                self.viewer_edit.editModeChanged.disconnect(self._on_edit_mode_changed)
+            except Exception:
+                pass
+
+            # on Apply click:
+            path = self.viewer_edit.save_buffer("./buffer.png")
+            logging.info(f"Buffer saved to: {path}")
+
+            self.viewer_stack.removeWidget(self.viewer_edit)
+            self.viewer_edit.deleteLater()
+            self.viewer_edit = None
+
+        # Destroy Apply button on exit
+        self._destroy_apply_button()
+
+        # Switch to orbit page
+        self.viewer_stack.setCurrentWidget(self.viewer_orbit)
+
+        # Re-enable orbit toggles
         self.chk_wire.setEnabled(True)
         self.chk_texture.setEnabled(True)
 
@@ -223,6 +288,12 @@ class GenerateWidget(QWidget):
         self.btn_edit_texture.setEnabled(has_texture)
 
     def _on_edit_mode_changed(self, enabled: bool):
-        self.btn_apply_texture.setVisible(enabled)
-        if self.btn_edit_texture.isChecked() != enabled:
-            self.btn_edit_texture.setChecked(enabled)
+        # If TextureEditViewer emits this, mirror the toggle state and ensure Apply button exists.
+        if enabled:
+            if not self.btn_edit_texture.isChecked():
+                self.btn_edit_texture.setChecked(True)
+            self._ensure_apply_button()
+        else:
+            if self.btn_edit_texture.isChecked():
+                self.btn_edit_texture.setChecked(False)
+            # Apply button is destroyed in _switch_to_orbit()
