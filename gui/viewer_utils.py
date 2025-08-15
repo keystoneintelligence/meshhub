@@ -193,7 +193,6 @@ def infer_texture_size(texture: pv.Texture) -> tuple[int, int]:
 
     # 2) Raw VTK image dimensions
     try:
-        # Many pv.Texture instances are thin wrappers around vtkTexture
         vtk_tex = texture  # pyvista forwards VTK API on wrapped objects
         if hasattr(vtk_tex, "GetInput"):
             img = vtk_tex.GetInput()
@@ -217,3 +216,92 @@ def infer_texture_size(texture: pv.Texture) -> tuple[int, int]:
 
     logging.warning(f"[EditTexture] Could not infer texture size")
     return None, None
+
+
+# ---------------------------
+# NEW: Texture/overlay helpers
+# ---------------------------
+
+def texture_to_numpy(texture: pv.Texture | None) -> np.ndarray | None:
+    """
+    Returns HxWx3 uint8 RGB from a pv.Texture (drops alpha if present).
+    """
+    if texture is None:
+        return None
+    # Preferred: pv.Texture.to_array()
+    try:
+        arr = texture.to_array()
+        if isinstance(arr, np.ndarray) and arr.ndim == 3:
+            if arr.shape[2] >= 3:
+                return arr[:, :, :3].astype(np.uint8)
+            if arr.shape[2] == 1:  # grayscale -> RGB
+                g = arr[:, :, 0].astype(np.uint8)
+                return np.stack([g, g, g], axis=-1)
+    except Exception:
+        pass
+
+    # Fallback via VTK scalars
+    try:
+        img = texture.GetInput() if hasattr(texture, "GetInput") else None
+        if img is None:
+            return None
+        w, h, _ = img.GetDimensions()
+        scalars = img.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+        np_scal = _vtk_to_numpy(scalars).reshape(h, w, -1)
+        if np_scal.shape[2] >= 3:
+            return np_scal[:, :, :3].astype(np.uint8)
+        if np_scal.shape[2] == 1:
+            g = np_scal[:, :, 0].astype(np.uint8)
+            return np.stack([g, g, g], axis=-1)
+    except Exception:
+        pass
+    return None
+
+
+def numpy_to_texture(rgb: np.ndarray) -> pv.Texture:
+    """
+    Create a pv.Texture from HxWx3 uint8 RGB and turn on sensible sampling flags.
+    """
+    tex = pv.Texture(rgb)
+    for fn_on in ("interpolate_on", "repeat_on", "edge_clamp_on"):
+        try:
+            getattr(tex, fn_on)()
+        except Exception:
+            # older pyvista may not expose all toggles; that's fine
+            pass
+    return tex
+
+
+def compose_green_preview(base_rgb: np.ndarray, mask_bw: np.ndarray, strength: float = 0.5) -> pv.Texture | None:
+    """
+    Blend a solid green overlay (RGB=[0,255,0]) on top of base_rgb,
+    using mask_bw (uint8 HxW, 0..255) as per-pixel alpha scaled by strength [0..1].
+    Returns a new pv.Texture.
+    """
+    if base_rgb is None or mask_bw is None:
+        return None
+
+    Hm, Wm = mask_bw.shape[:2]
+    Hb, Wb = base_rgb.shape[:2]
+    if (Hm != Hb) or (Wm != Wb):
+        # Prefer to keep them matched upstream, but resize mask to base to be safe.
+        try:
+            mask_img = Image.fromarray(mask_bw, mode="L")
+            mask_bw = np.array(mask_img.resize((Wb, Hb), Image.NEAREST))
+            Hm, Wm = Hb, Wb
+        except Exception:
+            logging.warning("[EditTexture] compose_green_preview: size mismatch and resize failed.")
+            return None
+
+    alpha = (mask_bw.astype(np.float32) / 255.0) * float(np.clip(strength, 0.0, 1.0))
+    alpha = alpha[..., None]  # HxWx1
+
+    base_f = base_rgb.astype(np.float32)
+    green = np.zeros_like(base_f, dtype=np.float32)
+    green[..., 1] = 255.0
+
+    out = base_f * (1.0 - alpha) + green * alpha
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    return numpy_to_texture(out)

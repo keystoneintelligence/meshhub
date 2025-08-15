@@ -19,6 +19,8 @@ from gui.viewer_utils import (
     compute_barycentric,
     get_active_tcoords_np,
     infer_texture_size,
+    texture_to_numpy,       # NEW
+    compose_green_preview,  # NEW
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,6 +33,7 @@ class TextureEditViewer(QWidget):
     # ---- Config (tweakable) ----
     DEFAULT_TEXTURE_RES = 1024   # used only if we cannot infer texture size
     BRUSH_RADIUS_PX = 8          # N will be 2*R+1 (square stamp)
+    OVERLAY_STRENGTH = 0.5       # 50% green where mask=255
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,8 +55,12 @@ class TextureEditViewer(QWidget):
 
         self._text_actor = None
 
-        # UV paint buffer (uint8, 0=black, 255=white) — will be resized to the actual texture size
+        # --- Mask buffer (always kept in memory, B/W uint8: 0..255)
         self.buffer = np.zeros((self.DEFAULT_TEXTURE_RES, self.DEFAULT_TEXTURE_RES), dtype=np.uint8)
+
+        # --- Original texture caches (for preview/restore)
+        self._base_tex_np: np.ndarray | None = None   # HxWx3 uint8
+        self._base_tex_vtk: pv.Texture | None = None  # exact handle to restore
 
         self.plot.set_background('black')
 
@@ -62,7 +69,11 @@ class TextureEditViewer(QWidget):
         self.mesh = mesh
         self.texture = texture
 
-        # Resize buffer to match the current texture size
+        # Cache original texture (numpy + VTK handle)
+        self._base_tex_np = texture_to_numpy(self.texture) if self.texture is not None else None
+        self._base_tex_vtk = self.texture
+
+        # Ensure buffer matches the texture size (keeps B/W mask in memory)
         self._resize_buffer_from_texture()
 
         tc = get_active_tcoords_np(self.mesh)
@@ -79,19 +90,26 @@ class TextureEditViewer(QWidget):
         return camera_state_get(self.plot.camera)
 
     def enter_mode(self):
-        # fresh buffer when entering edit mode (maintains current texture-sized shape)
+        # fresh buffer (same shape); show preview even if mask is empty
         self._reset_buffer()
         self._hide_hover_indicator()
+        self._apply_preview_texture()
         self.editModeChanged.emit(True)
 
     def exit_mode(self):
+        # restore original texture
         self._hide_hover_indicator()
-        self.plot.render()
+        if self.actor is not None and self._base_tex_vtk is not None:
+            try:
+                self.actor.SetTexture(self._base_tex_vtk)
+            except Exception:
+                pass
+            self.plot.render()
         self.editModeChanged.emit(False)
 
     # Convenience for GenerateWidget: call this when "Apply Texture" is clicked.
     def save_buffer(self, path: str = "./buffer.png") -> str:
-        """Save current UV buffer (grayscale) to the given path."""
+        """Save current UV buffer (grayscale) to the given path (mask stays in memory regardless)."""
         try:
             img = Image.fromarray(self.buffer, mode="L")
             img.save(path)
@@ -111,7 +129,7 @@ class TextureEditViewer(QWidget):
             self.hover_radius = compute_hover_radius(self.mesh)
             self.actor = self.plot.add_mesh(
                 self.mesh,
-                texture=self.texture,      # always show texture in edit mode
+                texture=self.texture,      # base texture is shown until we swap preview
                 show_edges=False
             )
 
@@ -192,9 +210,10 @@ class TextureEditViewer(QWidget):
             self.hover_actor = None
 
     # ---- Texture/buffer sizing ----
-
     def _resize_buffer_from_texture(self):
         w, h = infer_texture_size(self.texture)
+        if w is None or h is None:
+            w = h = self.DEFAULT_TEXTURE_RES
         self.buffer = np.zeros((h, w), dtype=np.uint8)
         logging.info(f"[EditTexture] Buffer resized to match texture: {w}x{h} (WxH).")
 
@@ -218,8 +237,11 @@ class TextureEditViewer(QWidget):
         y0 = max(py - R, 0)
         y1 = min(py + R, H - 1)
 
-        # Set to white
+        # Set to white in the mask (we KEEP this mask in memory for future use)
         self.buffer[y0:y1 + 1, x0:x1 + 1] = 255
+
+        # Update the live preview
+        self._apply_preview_texture()
 
     def _uv_from_picker(self, picker) -> tuple[bool, float, float]:
         if self.mesh is None:
@@ -238,7 +260,7 @@ class TextureEditViewer(QWidget):
         pts_xyz = self.mesh.points[idx].astype(float)
         pos = np.array(picker.GetPickPosition(), dtype=float)
 
-        # NEW: robust UV lookup
+        # Robust UV lookup
         tcoords = get_active_tcoords_np(self.mesh)
         if tcoords is None:
             logging.warning("[EditTexture] No valid texture coordinates on mesh; cannot paint UV buffer.")
@@ -291,3 +313,16 @@ class TextureEditViewer(QWidget):
                 return True
 
         return super().eventFilter(obj, event)
+
+    # ---- Preview application (uses helpers; keeps mask in memory) ----
+    def _apply_preview_texture(self):
+        if self.actor is None or self._base_tex_np is None:
+            return
+        tex = compose_green_preview(self._base_tex_np, self.buffer, strength=self.OVERLAY_STRENGTH)
+        if tex is None:
+            return
+        try:
+            self.actor.SetTexture(tex)
+        except Exception:
+            pass
+        self.plot.render()
