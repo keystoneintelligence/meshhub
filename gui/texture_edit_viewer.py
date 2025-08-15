@@ -11,9 +11,15 @@ import pyvista as pv
 from pyvistaqt import QtInteractor
 
 import vtk
-from vtkmodules.util.numpy_support import vtk_to_numpy as _vtk_to_numpy
 
-from gui.viewer_utils import camera_state_set, camera_state_get, compute_hover_radius
+from gui.viewer_utils import (
+    camera_state_set,
+    camera_state_get,
+    compute_hover_radius,
+    compute_barycentric,
+    get_active_tcoords_np,
+    infer_texture_size,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -59,7 +65,7 @@ class TextureEditViewer(QWidget):
         # Resize buffer to match the current texture size
         self._resize_buffer_from_texture()
 
-        tc = self._get_active_tcoords_np()
+        tc = get_active_tcoords_np(self.mesh)
         if tc is not None:
             logging.info(f"[EditTexture] UVs detected: shape={tc.shape}")
         else:
@@ -186,54 +192,9 @@ class TextureEditViewer(QWidget):
             self.hover_actor = None
 
     # ---- Texture/buffer sizing ----
-    def _infer_texture_size(self) -> tuple[int, int]:
-        """
-        Try to determine (width, height) of the current texture.
-        Tries PyVista->NumPy, then VTK image dimensions, then falls back.
-        """
-        if self.texture is None:
-            return self.DEFAULT_TEXTURE_RES, self.DEFAULT_TEXTURE_RES
-
-        # 1) PyVista to NumPy
-        try:
-            if hasattr(self.texture, "to_array"):
-                arr = self.texture.to_array()
-                if isinstance(arr, np.ndarray) and arr.ndim >= 2:
-                    h, w = int(arr.shape[0]), int(arr.shape[1])
-                    if h > 0 and w > 0:
-                        return w, h
-        except Exception:
-            pass
-
-        # 2) Raw VTK image dimensions
-        try:
-            # Many pv.Texture instances are thin wrappers around vtkTexture
-            vtk_tex = self.texture  # pyvista forwards VTK API on wrapped objects
-            if hasattr(vtk_tex, "GetInput"):
-                img = vtk_tex.GetInput()
-                if img is not None and hasattr(img, "GetDimensions"):
-                    dims = img.GetDimensions()  # (x, y, z)
-                    w, h = int(dims[0]), int(dims[1])
-                    if w > 0 and h > 0:
-                        return w, h
-        except Exception:
-            pass
-
-        # 3) Any last-resort attributes that might exist on some versions
-        for w_attr, h_attr in [("width", "height")]:
-            try:
-                w = int(getattr(self.texture, w_attr))
-                h = int(getattr(self.texture, h_attr))
-                if w > 0 and h > 0:
-                    return w, h
-            except Exception:
-                pass
-
-        logging.warning(f"[EditTexture] Could not infer texture size; falling back to {self.DEFAULT_TEXTURE_RES}x{self.DEFAULT_TEXTURE_RES}.")
-        return self.DEFAULT_TEXTURE_RES, self.DEFAULT_TEXTURE_RES
 
     def _resize_buffer_from_texture(self):
-        w, h = self._infer_texture_size()
+        w, h = infer_texture_size(self.texture)
         self.buffer = np.zeros((h, w), dtype=np.uint8)
         logging.info(f"[EditTexture] Buffer resized to match texture: {w}x{h} (WxH).")
 
@@ -260,28 +221,6 @@ class TextureEditViewer(QWidget):
         # Set to white
         self.buffer[y0:y1 + 1, x0:x1 + 1] = 255
 
-    def _compute_barycentric(self, tri_xyz: np.ndarray, p: np.ndarray):
-        """
-        Compute barycentric weights for point p in triangle defined by tri_xyz (3x3).
-        Returns (w0,w1,w2). Falls back to uniform if degenerate.
-        """
-        a, b, c = tri_xyz
-        v0 = b - a
-        v1 = c - a
-        v2 = p - a
-        d00 = np.dot(v0, v0)
-        d01 = np.dot(v0, v1)
-        d11 = np.dot(v1, v1)
-        d20 = np.dot(v2, v0)
-        d21 = np.dot(v2, v1)
-        denom = d00 * d11 - d01 * d01
-        if abs(denom) < 1e-12:
-            return np.array([1/3, 1/3, 1/3], dtype=np.float64)
-        v = (d11 * d20 - d01 * d21) / denom
-        w = (d00 * d21 - d01 * d20) / denom
-        u = 1.0 - v - w
-        return np.array([u, v, w], dtype=np.float64)
-
     def _uv_from_picker(self, picker) -> tuple[bool, float, float]:
         if self.mesh is None:
             return False, 0.0, 0.0
@@ -300,7 +239,7 @@ class TextureEditViewer(QWidget):
         pos = np.array(picker.GetPickPosition(), dtype=float)
 
         # NEW: robust UV lookup
-        tcoords = self._get_active_tcoords_np()
+        tcoords = get_active_tcoords_np(self.mesh)
         if tcoords is None:
             logging.warning("[EditTexture] No valid texture coordinates on mesh; cannot paint UV buffer.")
             return False, 0.0, 0.0
@@ -308,7 +247,7 @@ class TextureEditViewer(QWidget):
         tri_uv = tcoords[idx].astype(float)  # (3,2)
 
         # barycentric blend
-        w = self._compute_barycentric(pts_xyz, pos)
+        w = compute_barycentric(pts_xyz, pos)
         uv = (w[:, None] * tri_uv).sum(axis=0)
 
         u = float(np.clip(uv[0], 0.0, 1.0))
@@ -352,118 +291,3 @@ class TextureEditViewer(QWidget):
                 return True
 
         return super().eventFilter(obj, event)
-
-    def _ensure_active_tcoords(self) -> bool:
-        """
-        Ensure mesh has active texture coordinates (t_coords).
-        Returns True if active tcoords are available after this call.
-        """
-        if self.mesh is None:
-            return False
-
-        # If already active, we're done
-        try:
-            tc = self.mesh.t_coords
-            if tc is not None and tc.shape[1] >= 2 and len(tc) == self.mesh.n_points:
-                return True
-        except Exception:
-            pass
-
-        # Common UV names from GLTF/engines
-        preferred_names = [
-            "TEXCOORD_0", "TEXCOORD0", "TEXCOORD", "uv0", "uv",
-            "UV0", "UV", "st", "ST", "t_coords", "TCoords",
-            "Texture Coordinates", "texture_coordinates"
-        ]
-
-        # 1) Try preferred names in point_data
-        for name in preferred_names:
-            if name in self.mesh.point_data:
-                arr = self.mesh.point_data[name]
-                try:
-                    if arr is not None and arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == self.mesh.n_points:
-                        # Make it the active t_coords
-                        self.mesh.point_data.set_array(arr[:, :2], "TCoords")  # standard name
-                        try:
-                            self.mesh.active_t_coords_name = "TCoords"
-                        except Exception:
-                            pass
-                        logging.info(f"[EditTexture] Using point_data UVs from '{name}' as active TCoords.")
-                        return True
-                except Exception:
-                    pass
-
-        # 2) Fall back: any 2-component point array that matches n_points
-        for name, arr in self.mesh.point_data.items():
-            try:
-                if arr is not None and arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == self.mesh.n_points:
-                    self.mesh.point_data.set_array(arr[:, :2], "TCoords")
-                    try:
-                        self.mesh.active_t_coords_name = "TCoords"
-                    except Exception:
-                        pass
-                    logging.info(f"[EditTexture] Using point_data UVs from '{name}' as active TCoords (fallback).")
-                    return True
-            except Exception:
-                pass
-
-        # (Optional) Debug what arrays we saw
-        try:
-            pd_names = list(self.mesh.point_data.keys())
-            logging.warning(f"[EditTexture] No suitable UVs found in point_data. Available arrays: {pd_names}")
-        except Exception:
-            logging.warning("[EditTexture] No suitable UVs found; cannot list point_data arrays.")
-
-        return False
-
-    def _get_active_tcoords_np(self):
-        """
-        Return UVs as a NumPy array of shape (n_points, 2), or None if unavailable.
-        Works across PyVista/VTK versions:
-        1) Try mesh.t_coords (newer PyVista)
-        2) Try point_data arrays (e.g., 'TEXCOORD_0', 'TCoords', etc.)
-        3) Try VTK GetTCoords()
-        """
-        if self.mesh is None:
-            return None
-
-        # 1) Newer PyVista property
-        try:
-            tcoords = getattr(self.mesh, "t_coords", None)
-            if tcoords is not None:
-                tc = np.asarray(tcoords)
-                if tc.ndim == 2 and tc.shape[1] >= 2 and len(tc) == self.mesh.n_points:
-                    return tc[:, :2]
-        except Exception:
-            pass
-
-        # 2) Named arrays in point_data
-        preferred_names = [
-            "TEXCOORD_0", "TEXCOORD0", "TEXCOORD", "uv0", "uv",
-            "UV0", "UV", "st", "ST", "t_coords", "TCoords",
-            "Texture Coordinates", "texture_coordinates",
-        ]
-        # preferred names first
-        for name in preferred_names:
-            if name in self.mesh.point_data:
-                arr = np.asarray(self.mesh.point_data[name])
-                if arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == self.mesh.n_points:
-                    return arr[:, :2]
-        # any suitable 2‑component point array as a fallback
-        for name, arr in self.mesh.point_data.items():
-            arr = np.asarray(arr)
-            if arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == self.mesh.n_points:
-                return arr[:, :2]
-
-        # 3) Raw VTK tcoords
-        try:
-            pd = self.mesh.GetPointData()
-            vtk_arr = pd.GetTCoords() if pd is not None else None
-            if vtk_arr is not None and _vtk_to_numpy is not None:
-                tc = _vtk_to_numpy(vtk_arr)
-                if tc.ndim == 2 and tc.shape[1] >= 2 and len(tc) == self.mesh.n_points:
-                    return tc[:, :2]
-        except Exception:
-            pass
-
-        return None

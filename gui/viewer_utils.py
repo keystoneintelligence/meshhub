@@ -6,6 +6,7 @@ import numpy as np
 import pyvista as pv
 import pygltflib
 
+from vtkmodules.util.numpy_support import vtk_to_numpy as _vtk_to_numpy
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -93,3 +94,126 @@ def camera_state_set(cam, state: dict):
             cam.SetClippingRange(*state["clipping_range"])
     except Exception as e:
         logging.debug(f"Camera state apply fallback: {e}")
+
+
+def compute_barycentric(tri_xyz: np.ndarray, p: np.ndarray):
+    """
+    Compute barycentric weights for point p in triangle defined by tri_xyz (3x3).
+    Returns (w0,w1,w2). Falls back to uniform if degenerate.
+    """
+    a, b, c = tri_xyz
+    v0 = b - a
+    v1 = c - a
+    v2 = p - a
+    d00 = np.dot(v0, v0)
+    d01 = np.dot(v0, v1)
+    d11 = np.dot(v1, v1)
+    d20 = np.dot(v2, v0)
+    d21 = np.dot(v2, v1)
+    denom = d00 * d11 - d01 * d01
+    if abs(denom) < 1e-12:
+        return np.array([1/3, 1/3, 1/3], dtype=np.float64)
+    v = (d11 * d20 - d01 * d21) / denom
+    w = (d00 * d21 - d01 * d20) / denom
+    u = 1.0 - v - w
+    return np.array([u, v, w], dtype=np.float64)
+
+
+def get_active_tcoords_np(mesh: pv.PolyData):
+    """
+    Return UVs as a NumPy array of shape (n_points, 2), or None if unavailable.
+    Works across PyVista/VTK versions:
+    1) Try mesh.t_coords (newer PyVista)
+    2) Try point_data arrays (e.g., 'TEXCOORD_0', 'TCoords', etc.)
+    3) Try VTK GetTCoords()
+    """
+    if mesh is None:
+        return None
+
+    # 1) Newer PyVista property
+    try:
+        tcoords = getattr(mesh, "t_coords", None)
+        if tcoords is not None:
+            tc = np.asarray(tcoords)
+            if tc.ndim == 2 and tc.shape[1] >= 2 and len(tc) == mesh.n_points:
+                return tc[:, :2]
+    except Exception:
+        pass
+
+    # 2) Named arrays in point_data
+    preferred_names = [
+        "TEXCOORD_0", "TEXCOORD0", "TEXCOORD", "uv0", "uv",
+        "UV0", "UV", "st", "ST", "t_coords", "TCoords",
+        "Texture Coordinates", "texture_coordinates",
+    ]
+    # preferred names first
+    for name in preferred_names:
+        if name in mesh.point_data:
+            arr = np.asarray(mesh.point_data[name])
+            if arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == mesh.n_points:
+                return arr[:, :2]
+    # any suitable 2‑component point array as a fallback
+    for name, arr in mesh.point_data.items():
+        arr = np.asarray(arr)
+        if arr.ndim == 2 and arr.shape[1] >= 2 and len(arr) == mesh.n_points:
+            return arr[:, :2]
+
+    # 3) Raw VTK tcoords
+    try:
+        pd = mesh.GetPointData()
+        vtk_arr = pd.GetTCoords() if pd is not None else None
+        if vtk_arr is not None and _vtk_to_numpy is not None:
+            tc = _vtk_to_numpy(vtk_arr)
+            if tc.ndim == 2 and tc.shape[1] >= 2 and len(tc) == mesh.n_points:
+                return tc[:, :2]
+    except Exception:
+        pass
+
+    return None
+
+
+def infer_texture_size(texture: pv.Texture) -> tuple[int, int]:
+    """
+    Try to determine (width, height) of the current texture.
+    Tries PyVista->NumPy, then VTK image dimensions, then falls back.
+    """
+    if texture is None:
+        return None, None
+
+    # 1) PyVista to NumPy
+    try:
+        if hasattr(texture, "to_array"):
+            arr = texture.to_array()
+            if isinstance(arr, np.ndarray) and arr.ndim >= 2:
+                h, w = int(arr.shape[0]), int(arr.shape[1])
+                if h > 0 and w > 0:
+                    return w, h
+    except Exception:
+        pass
+
+    # 2) Raw VTK image dimensions
+    try:
+        # Many pv.Texture instances are thin wrappers around vtkTexture
+        vtk_tex = texture  # pyvista forwards VTK API on wrapped objects
+        if hasattr(vtk_tex, "GetInput"):
+            img = vtk_tex.GetInput()
+            if img is not None and hasattr(img, "GetDimensions"):
+                dims = img.GetDimensions()  # (x, y, z)
+                w, h = int(dims[0]), int(dims[1])
+                if w > 0 and h > 0:
+                    return w, h
+    except Exception:
+        pass
+
+    # 3) Any last-resort attributes that might exist on some versions
+    for w_attr, h_attr in [("width", "height")]:
+        try:
+            w = int(getattr(texture, w_attr))
+            h = int(getattr(texture, h_attr))
+            if w > 0 and h > 0:
+                return w, h
+        except Exception:
+            pass
+
+    logging.warning(f"[EditTexture] Could not infer texture size")
+    return None, None
