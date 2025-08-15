@@ -11,7 +11,7 @@ import pyvista as pv
 from pyvistaqt import QtInteractor
 
 import vtk
-
+from pipelines.texture_infill import inpaint_glb_texture
 from gui.viewer_utils import (
     camera_state_set,
     camera_state_get,
@@ -326,3 +326,51 @@ class TextureEditViewer(QWidget):
         except Exception:
             pass
         self.plot.render()
+
+    def inpaint_current_glb(
+        self,
+        glb_path: str,
+        output_dir: str,
+        *,
+        model_id: str = "runwayml/stable-diffusion-inpainting",
+        guidance_scale: float = 3.0,
+        num_inference_steps: int = 30,
+        mask_filename: str = "mask_uv.png",
+    ) -> str:
+        """
+        Use the ORIGINAL GLB and the current grayscale mask (kept in memory)
+        to run texture inpainting and write a new GLB. Returns the output path.
+
+        Implementation details:
+        - Flips the mask vertically (UV space vs image space) before saving.
+        - Saves as 8-bit L PNG to `output_dir/mask_filename`.
+        - Calls `inpaint_glb_texture` (from texture_infill.py), which handles
+          mask-to-texture resizing with NEAREST and embeds the new PNG into the GLB.
+        """
+        if self.buffer is None or self.buffer.size == 0:
+            raise RuntimeError("No mask buffer available to inpaint.")
+
+        if not np.any(self.buffer > 0):
+            logging.info("[Inpaint] Mask is empty (all black). Skipping inpaint.")
+            return None
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 1) Flip vertically to align with baseColor texture orientation
+        mask_to_save = np.flipud(self.buffer)
+
+        # 2) Write mask as 8-bit L
+        mask_path = os.path.join(output_dir, mask_filename)
+        Image.fromarray(mask_to_save.astype(np.uint8), mode="L").save(mask_path)
+
+        # 3) Call the inpaint wrapper
+        out_path = inpaint_glb_texture(
+            glb_path=glb_path,
+            mask_path=mask_path,
+            output_dir=output_dir,
+            model_id=model_id,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+        )
+        logging.info(f"[Inpaint] Wrote inpainted GLB => {out_path}")
+        return out_path

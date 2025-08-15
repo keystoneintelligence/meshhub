@@ -256,10 +256,6 @@ class GenerateWidget(QWidget):
             except Exception:
                 pass
 
-            # on Apply click:
-            path = self.viewer_edit.save_buffer("./buffer.png")
-            logging.info(f"Buffer saved to: {path}")
-
             self.viewer_stack.removeWidget(self.viewer_edit)
             self.viewer_edit.deleteLater()
             self.viewer_edit = None
@@ -276,9 +272,24 @@ class GenerateWidget(QWidget):
 
     def _on_apply_texture(self):
         logging.info("Apply clicked — exiting Edit Texture mode")
+        # on Apply click:
+        path = self.viewer_edit.save_buffer("./buffer.png")
+        logging.info(f"Buffer saved to: {path}")
+        out_glb = self.viewer_edit.inpaint_current_glb(
+            glb_path=self.last_model_path,
+            output_dir="./inpaint_out",
+            model_id="runwayml/stable-diffusion-inpainting",
+            guidance_scale=3.0,
+            num_inference_steps=30,
+        )
+        if out_glb:
+            logging.info(f".glb saved to: {out_glb}")
+
         if self.btn_edit_texture.isChecked():
             self.btn_edit_texture.setChecked(False)
         self._switch_to_orbit(preserve_camera=True)
+        if out_glb:
+            self.viewer_orbit.load_model(out_glb, reset=True)
 
     # ----------------- Viewer signal handlers -----------------
     def _on_model_loaded(self, path: str, has_texture: bool):

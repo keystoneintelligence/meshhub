@@ -27,7 +27,7 @@ class ImageTo3DModelOption(str, Enum):
 
 class TextureModelOption(str, Enum):
     # Placeholder for texture generation models
-    HUNYUAN3D2MINI = "Hunyuan3D-2mini"
+    HUNYUAN3D2MINILOWVRAM = "Hunyuan3D-2mini-LowVram"
     # Add more texture models here as needed
 
 
@@ -101,7 +101,9 @@ def generate(
         except ValueError:
             valid = ", ".join([opt.value for opt in TextureModelOption])
             raise ValueError(f"Unknown texture model: {texture_model!r}. Valid options are: {valid}")
-        textured_model_path = apply_texture_to_model(base_model_path, image_path)
-        return textured_model_path
+        
+        if texture_option is TextureModelOption.HUNYUAN3D2MINILOWVRAM:
+            textured_model_path = apply_texture_to_model(base_model_path, image_path)
+            return textured_model_path
 
     return base_model_path
