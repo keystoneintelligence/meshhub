@@ -79,7 +79,7 @@ def generate(
             raise ValueError(f"Unknown text-to-3D model: {model!r}. Valid options are: {valid}")
 
         if model_option is TextTo3DModelOption.HUNYUAN3D2MINI:
-            base_model_path = generate_text_to_3d_hunyuan3d_2mini(text_prompt)
+            base_model_path, image_path = generate_text_to_3d_hunyuan3d_2mini(text_prompt)
         elif model_option is TextTo3DModelOption.TRELLIS:
             # base_model_path = generate_text_to_3d_trellis(text_prompt)
             base_model_path = None  # placeholder
