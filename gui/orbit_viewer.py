@@ -45,7 +45,7 @@ class OrbitViewer(QWidget):
         self._text_actor = None
 
         self._show_texture = True
-        self._show_wire = True
+        self._show_wire = False
 
         # Orbit / inertia
         self._rotating = False

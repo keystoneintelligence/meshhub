@@ -86,7 +86,7 @@ class GenerateWidget(QWidget):
         self.chk_texture = QCheckBox("Show Texture")
         self.chk_texture.setChecked(True)
         self.chk_wire = QCheckBox("Show Wireframe")
-        self.chk_wire.setChecked(True)
+        self.chk_wire.setChecked(False)
         opts_layout.addWidget(self.chk_texture)
         opts_layout.addWidget(self.chk_wire)
         self._root_layout.addLayout(opts_layout)
