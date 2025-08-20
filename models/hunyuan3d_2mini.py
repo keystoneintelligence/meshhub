@@ -50,7 +50,7 @@ def _extract_mesh(out) -> trimesh.Trimesh:
 
     raise TypeError(f"Unrecognized pipeline output type: {type(out)}")
 
-def generate_text_to_3d_hunyuan3d_2mini(prompt: str, output_path: str = None) -> str:
+def generate_text_to_3d_hunyuan3d_2mini(prompt: str, requested_faces: int, output_path: str = None) -> str:
     pipeline_t2i = HunyuanDiTPipeline(
         'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
         device=get_default_device()
@@ -60,10 +60,10 @@ def generate_text_to_3d_hunyuan3d_2mini(prompt: str, output_path: str = None) ->
     gen_img_outpath = "./t2i.png"
     image.save(gen_img_outpath)
     print(f"Saved {gen_img_outpath}")
-    return generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, output_path), gen_img_outpath
+    return generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path), gen_img_outpath
     
 
-def generate_image_to_3d_hunyuan3d_2mini(image_path: str, output_path: str = None) -> str:
+def generate_image_to_3d_hunyuan3d_2mini(image_path: str, requested_faces: int, output_path: str = None) -> str:
     #return "treasurechest_3d.glb"
     pipeline = _get_pipeline()
     img = Image.open(image_path).convert("RGBA")
@@ -84,12 +84,14 @@ def generate_image_to_3d_hunyuan3d_2mini(image_path: str, output_path: str = Non
     mesh = _extract_mesh(raw)
 
     mesh = remove_degenerate_face(mesh)
-    mesh = reduce_face(mesh)
-    #mesh = mesh.simplify_quadric_decimation(percent=0.99)
+    mesh = reduce_face(mesh, requested_faces)
 
     if output_path is None:
         base = os.path.splitext(os.path.basename(image_path))[0]
         output_path = f"{base}_3d.glb"
+    else:
+        base = os.path.splitext(os.path.basename(image_path))[0].split("/")[-1]
+        output_path = os.path.join(output_path, f"{base}_3d.glb")
     print(f"[DEBUG] Exporting mesh to {output_path}")
     mesh.export(output_path)
 

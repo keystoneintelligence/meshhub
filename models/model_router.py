@@ -1,6 +1,5 @@
 # models/model_router.py
 
-import os
 from enum import Enum
 from typing import Optional
 
@@ -9,31 +8,24 @@ from models.hunyuan3d_2mini import (
     generate_image_to_3d_hunyuan3d_2mini,
     apply_texture_to_model,
 )
-# from models.trellis import (
-#     generate_text_to_3d_trellis,
-#     generate_image_to_3d_trellis,
-# )
 
 
 class TextTo3DModelOption(str, Enum):
     # https://huggingface.co/tencent/Hunyuan3D-2mini
     HUNYUAN3D2MINI = "Hunyuan3D-2mini"
-    # https://github.com/Microsoft/TRELLIS
-    TRELLIS = "TRELLIS"
 
 class ImageTo3DModelOption(str, Enum):
     HUNYUAN3D2MINI = "Hunyuan3D-2mini"
-    TRELLIS = "TRELLIS"
 
 class TextureModelOption(str, Enum):
-    # Placeholder for texture generation models
     HUNYUAN3D2MINILOWVRAM = "Hunyuan3D-2mini-LowVram"
-    # Add more texture models here as needed
 
 
 def generate(
     model: str,
     mode: str,
+    requested_faces: int,
+    output_folder: str,
     image_path: Optional[str] = None,
     text_prompt: Optional[str] = None,
     texture_model: Optional[str] = None,
@@ -61,7 +53,7 @@ def generate(
             raise ValueError(f"Unknown image-to-3D model: {model!r}. Valid options are: {valid}")
 
         if model_option is ImageTo3DModelOption.HUNYUAN3D2MINI:
-            base_model_path = generate_image_to_3d_hunyuan3d_2mini(image_path)
+            base_model_path = generate_image_to_3d_hunyuan3d_2mini(image_path, requested_faces, output_folder)
         elif model_option is ImageTo3DModelOption.TRELLIS:
             # base_model_path = generate_image_to_3d_trellis(image_path)
             base_model_path = None  # placeholder
@@ -79,7 +71,7 @@ def generate(
             raise ValueError(f"Unknown text-to-3D model: {model!r}. Valid options are: {valid}")
 
         if model_option is TextTo3DModelOption.HUNYUAN3D2MINI:
-            base_model_path, image_path = generate_text_to_3d_hunyuan3d_2mini(text_prompt)
+            base_model_path, image_path = generate_text_to_3d_hunyuan3d_2mini(text_prompt, requested_faces, output_folder)
         elif model_option is TextTo3DModelOption.TRELLIS:
             # base_model_path = generate_text_to_3d_trellis(text_prompt)
             base_model_path = None  # placeholder

@@ -23,6 +23,7 @@ def _get_pipe(model_id: str):
         model_id,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         safety_checker=None,
+        use_safetensors=True,
     )
     if device == "cuda":
         pipe = pipe.to(device)
@@ -36,7 +37,7 @@ def _get_pipe(model_id: str):
 def inpaint_image(
     image: Image.Image,
     mask: Image.Image,
-    model_id: str = "runwayml/stable-diffusion-inpainting",
+    model_id: str = "stabilityai/stable-diffusion-2-inpainting",
     guidance_scale: float = 3.0,
     num_inference_steps: int = 30,
 ) -> Image.Image:
@@ -163,7 +164,7 @@ def inpaint_glb_texture(
     glb_path: str,
     mask_path: str,
     output_dir: str,
-    model_id: str = "runwayml/stable-diffusion-inpainting",
+    model_id: str = "stabilityai/stable-diffusion-2-inpainting",
     guidance_scale: float = 3.0,
     num_inference_steps: int = 30,
 ) -> str:

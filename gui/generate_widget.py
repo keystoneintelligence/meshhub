@@ -2,25 +2,12 @@
 import os
 import shutil
 import logging
-from io import BytesIO
-from PIL import Image
-import numpy as np
+from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton,
-    QComboBox, QLineEdit, QFileDialog, QHBoxLayout, QCheckBox, QStackedWidget
+    QComboBox, QLineEdit, QFileDialog, QHBoxLayout, QCheckBox, QStackedWidget, QSpinBox
 )
-
-import pyvista as pv
-from pyvistaqt import QtInteractor
-import pygltflib
-
-# VTK for picking
-try:
-    import vtk
-except Exception:
-    vtk = None
 
 from models.model_router import (
     generate,
@@ -42,6 +29,7 @@ class GenerateWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.last_model_path = None
+        self._is_generating = False
 
         # --- Top-level layout ---
         self._root_layout = QVBoxLayout(self)
@@ -69,6 +57,25 @@ class GenerateWidget(QWidget):
         self._root_layout.addWidget(QLabel("Texture Model:"))
         self.texture_selector = QComboBox()
         self._root_layout.addWidget(self.texture_selector)
+
+        # Requested faces input
+        self._root_layout.addWidget(QLabel("Target Faces:"))
+        self.faces_input = QSpinBox()
+        self.faces_input.setRange(100, 2000000)
+        self.faces_input.setSingleStep(500)
+        self.faces_input.setValue(10000)
+        self._root_layout.addWidget(self.faces_input)
+
+        # Output folder picker (defaults to ./output/{timestamp})
+        self._root_layout.addWidget(QLabel("Output Folder:"))
+        self.output_folder = ""
+        out_layout = QHBoxLayout()
+        self.output_edit = QLineEdit()
+        self.output_btn = QPushButton("Choose…")
+        self.output_btn.clicked.connect(self._pick_output_folder)
+        out_layout.addWidget(self.output_edit)
+        out_layout.addWidget(self.output_btn)
+        self._root_layout.addLayout(out_layout)
 
         btn_layout = QHBoxLayout()
         self.generate_btn = QPushButton("Generate")
@@ -142,10 +149,26 @@ class GenerateWidget(QWidget):
             self.selected_image = path
 
     def _on_generate(self):
+        # Prevent re-entrancy and queuing while a generation is in progress
+        if self._is_generating:
+            logging.info("Generate ignored: a generation is already running.")
+            return
+        self._is_generating = True
+        self.generate_btn.setEnabled(False)
+        self.generate_btn.setText("Generating…")
         try:
+            # Ensure destination exists; if none chosen, create a timestamped default
+            chosen_folder = self.output_edit.text().strip()
+            if not chosen_folder:
+                chosen_folder = os.path.join(".", "output", datetime.now().strftime("%Y%m%d_%H%M%S"))
+                self.output_edit.setText(chosen_folder)
+            self.output_folder = chosen_folder
+            os.makedirs(self.output_folder, exist_ok=True)
             output_path = generate(
                 model=self.model_selector.currentText(),
                 mode=self.mode_selector.currentText(),
+                requested_faces=self.faces_input.value(),
+                output_folder=self.output_folder,
                 image_path=getattr(self, 'selected_image', None),
                 text_prompt=self.text_input.text(),
                 texture_model=self.texture_selector.currentText()
@@ -157,6 +180,10 @@ class GenerateWidget(QWidget):
         except Exception as e:
             logging.error(f"Error generating model: {e}", exc_info=True)
             self.viewer_orbit.load_placeholder(reset=True)
+        finally:
+            self._is_generating = False
+            self.generate_btn.setEnabled(True)
+            self.generate_btn.setText("Generate")
 
     def _on_export(self):
         if not self.last_model_path:
@@ -278,7 +305,7 @@ class GenerateWidget(QWidget):
         out_glb = self.viewer_edit.inpaint_current_glb(
             glb_path=self.last_model_path,
             output_dir="./inpaint_out",
-            model_id="runwayml/stable-diffusion-inpainting",
+            model_id="stabilityai/stable-diffusion-2-inpainting",
             guidance_scale=3.0,
             num_inference_steps=30,
         )
@@ -308,3 +335,9 @@ class GenerateWidget(QWidget):
             if self.btn_edit_texture.isChecked():
                 self.btn_edit_texture.setChecked(False)
             # Apply button is destroyed in _switch_to_orbit()
+
+    def _pick_output_folder(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.output_folder or ".")
+        if path:
+            self.output_folder = path
+            self.output_edit.setText(path)

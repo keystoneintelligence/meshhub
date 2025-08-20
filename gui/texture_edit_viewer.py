@@ -332,7 +332,7 @@ class TextureEditViewer(QWidget):
         glb_path: str,
         output_dir: str,
         *,
-        model_id: str = "runwayml/stable-diffusion-inpainting",
+        model_id: str = "stabilityai/stable-diffusion-2-inpainting",
         guidance_scale: float = 3.0,
         num_inference_steps: int = 30,
         mask_filename: str = "mask_uv.png",
