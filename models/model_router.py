@@ -14,11 +14,17 @@ class TextTo3DModelOption(str, Enum):
     # https://huggingface.co/tencent/Hunyuan3D-2mini
     HUNYUAN3D2MINI = "Hunyuan3D-2mini"
 
+
 class ImageTo3DModelOption(str, Enum):
     HUNYUAN3D2MINI = "Hunyuan3D-2mini"
 
+
 class TextureModelOption(str, Enum):
     HUNYUAN3D2MINILOWVRAM = "Hunyuan3D-2mini-LowVram"
+
+
+class TextureInpaintModelOption(str, Enum):
+    STABILITY_INPAINTING = "stabilityai/stable-diffusion-2-inpainting"
 
 
 def generate(

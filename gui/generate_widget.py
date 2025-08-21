@@ -13,7 +13,8 @@ from models.model_router import (
     generate,
     TextTo3DModelOption,
     ImageTo3DModelOption,
-    TextureModelOption
+    TextureModelOption,
+    TextureInpaintModelOption,
 )
 from gui.orbit_viewer import OrbitViewer
 from gui.texture_edit_viewer import TextureEditViewer
@@ -66,11 +67,11 @@ class GenerateWidget(QWidget):
         self.faces_input.setValue(10000)
         self._root_layout.addWidget(self.faces_input)
 
-        # Output folder picker (defaults to ./output/{timestamp})
+        # Output folder picker (defaults to ./output)
         self._root_layout.addWidget(QLabel("Output Folder:"))
-        self.output_folder = ""
+        self.output_folder = os.path.join(".", "output")
         out_layout = QHBoxLayout()
-        self.output_edit = QLineEdit()
+        self.output_edit = QLineEdit(self.output_folder)
         self.output_btn = QPushButton("Choose…")
         self.output_btn.clicked.connect(self._pick_output_folder)
         out_layout.addWidget(self.output_edit)
@@ -101,10 +102,34 @@ class GenerateWidget(QWidget):
         # Edit Texture controls
         # Note: Apply button is created/destroyed dynamically in edit mode.
         edit_layout = QHBoxLayout()
+        edit_layout.setContentsMargins(0, 0, 0, 0)
+        edit_layout.setSpacing(12)
         self.btn_edit_texture = QPushButton("Edit Texture")
         self.btn_edit_texture.setCheckable(True)
         self.btn_edit_texture.setEnabled(False)  # only when textured model is loaded
         edit_layout.addWidget(self.btn_edit_texture)
+
+        # Edit-time inpainting model selector (hidden until Edit Texture is active)
+        # Pack label + selector tightly in their own row chunk
+        edit_model_layout = QHBoxLayout()
+        edit_model_layout.setContentsMargins(0, 0, 0, 0)
+        edit_model_layout.setSpacing(6)
+
+        self.lbl_edit_model = QLabel("Edit Model:")
+        self.edit_model_selector = QComboBox()
+        self.edit_model_selector.addItems([t.value for t in TextureInpaintModelOption])
+        self.lbl_edit_model.setVisible(False)
+        self.edit_model_selector.setVisible(False)
+
+        edit_model_layout.addWidget(self.lbl_edit_model)
+        # let the selector breathe/expand
+        edit_model_layout.addWidget(self.edit_model_selector, stretch=1)
+
+        # add the (label + selector) group into the main edit bar
+        edit_layout.addLayout(edit_model_layout)
+        # spacer so Apply sits away from the selector on the right
+        edit_layout.addStretch(1)
+
         self._root_layout.addLayout(edit_layout)
         self._edit_controls_layout = edit_layout
         self.btn_apply_texture = None  # created on-demand
@@ -157,18 +182,19 @@ class GenerateWidget(QWidget):
         self.generate_btn.setEnabled(False)
         self.generate_btn.setText("Generating…")
         try:
-            # Ensure destination exists; if none chosen, create a timestamped default
-            chosen_folder = self.output_edit.text().strip()
-            if not chosen_folder:
-                chosen_folder = os.path.join(".", "output", datetime.now().strftime("%Y%m%d_%H%M%S"))
-                self.output_edit.setText(chosen_folder)
-            self.output_folder = chosen_folder
-            os.makedirs(self.output_folder, exist_ok=True)
+            # Use base folder from user selection or default ./output
+            base_folder = self.output_edit.text().strip() or os.path.join(".", "output")
+            os.makedirs(base_folder, exist_ok=True)
+
+            # Create timestamped subfolder for this run
+            run_folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
+            os.makedirs(run_folder, exist_ok=True)
+
             output_path = generate(
                 model=self.model_selector.currentText(),
                 mode=self.mode_selector.currentText(),
                 requested_faces=self.faces_input.value(),
-                output_folder=self.output_folder,
+                output_folder=run_folder,
                 image_path=getattr(self, 'selected_image', None),
                 text_prompt=self.text_input.text(),
                 texture_model=self.texture_selector.currentText()
@@ -255,6 +281,11 @@ class GenerateWidget(QWidget):
         # Build a fresh Apply button
         self._ensure_apply_button()
 
+        # Reveal & preset the edit model dropdown during edit mode
+        self.lbl_edit_model.setVisible(True)
+        self.edit_model_selector.setVisible(True)
+        self.edit_model_selector.setCurrentIndex(0)
+
         # Disable orbit toggles during edit
         self.chk_wire.setEnabled(False)
         self.chk_texture.setEnabled(False)
@@ -293,6 +324,10 @@ class GenerateWidget(QWidget):
         # Switch to orbit page
         self.viewer_stack.setCurrentWidget(self.viewer_orbit)
 
+        # Hide edit-only controls
+        self.lbl_edit_model.setVisible(False)
+        self.edit_model_selector.setVisible(False)
+
         # Re-enable orbit toggles
         self.chk_wire.setEnabled(True)
         self.chk_texture.setEnabled(True)
@@ -300,12 +335,12 @@ class GenerateWidget(QWidget):
     def _on_apply_texture(self):
         logging.info("Apply clicked — exiting Edit Texture mode")
         # on Apply click:
-        path = self.viewer_edit.save_buffer("./buffer.png")
-        logging.info(f"Buffer saved to: {path}")
+        # Save into the same folder as the last generated model
+        out_dir = os.path.dirname(self.last_model_path) if self.last_model_path else "."
         out_glb = self.viewer_edit.inpaint_current_glb(
             glb_path=self.last_model_path,
-            output_dir="./inpaint_out",
-            model_id="stabilityai/stable-diffusion-2-inpainting",
+            output_dir=out_dir,
+            model_id=self.edit_model_selector.currentText(),
             guidance_scale=3.0,
             num_inference_steps=30,
         )
