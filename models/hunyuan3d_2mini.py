@@ -3,11 +3,11 @@ import torch
 from PIL import Image
 import trimesh
 from models.utils import remove_degenerate_face, reduce_face
-from hy3dgen.rembg import BackgroundRemover
-from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
+from tencent_hy3dgen.rembg import BackgroundRemover
+from tencent_hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 # from hy3dgen.texgen import Hunyuan3DPaintPipeline
 from pipelines.texgen_min_vram import LowVram3DPaintPipeline
-from hy3dgen.text2image import HunyuanDiTPipeline
+from tencent_hy3dgen.text2image import HunyuanDiTPipeline
 
 NUM_INFERENCE_STEPS = 25
 OCTREE_RESOLUTION   = 128
@@ -57,7 +57,7 @@ def generate_text_to_3d_hunyuan3d_2mini(prompt: str, requested_faces: int, outpu
     )
     image = pipeline_t2i(prompt)
     image = BackgroundRemover()(image)
-    gen_img_outpath = "./t2i.png"
+    gen_img_outpath = os.path.join(output_path, "t2i.png")
     image.save(gen_img_outpath)
     print(f"Saved {gen_img_outpath}")
     return generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path), gen_img_outpath
@@ -122,8 +122,10 @@ def apply_texture_to_model(model_path: str, texture_path: str) -> str:
 
     mesh, metadata = pipeline(mesh, image=img)
 
-    # Save everything into ./debug_run_001
-    paths = metadata.save("./debug_run_001")
+    # Save metadata next to the model in a 'metadata' folder
+    meta_dir = os.path.join(os.path.dirname(model_path), "metadata")
+    os.makedirs(meta_dir, exist_ok=True)
+    paths = metadata.save(meta_dir)
 
     print("Metadata JSON + images saved. Image file paths:")
     for stage, files in paths.items():

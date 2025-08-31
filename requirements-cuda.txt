@@ -6,7 +6,7 @@ PySide6>=6.5.0
 pyqtgraph>=0.13.0
 trimesh>=3.22.0
 PyOpenGL>=3.1.6
-PyOpenGL-accelerate>=3.1.6
+
 numpy>=1.23.0
 pygltflib>=1.14.0
 fast-simplification
@@ -20,6 +20,15 @@ torchvision>=0.15.0
 safetensors>=0.3.0
 sentencepiece
 
+# pins to fix Self reference issue
+accelerate==1.9.0
+transformers==4.55.0
+huggingface-hub==0.34.3
+gradio==5.41.0
+gradio-client==1.11.0
+PyOpenGL-accelerate==3.1.9
+protobuf==6.31.1
+
 # Image loading
 Pillow>=9.0.0
 
@@ -28,3 +37,4 @@ typing_extensions>=4.5.0
 
 pybind11
 cmake
+pyinstaller

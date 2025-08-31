@@ -1,0 +1,3 @@
+-e .
+-e ./tencent_hy3dgen/texgen/differentiable_renderer
+-e ./tencent_hy3dgen/texgen/custom_rasterizer

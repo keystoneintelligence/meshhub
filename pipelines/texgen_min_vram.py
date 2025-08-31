@@ -14,10 +14,10 @@ import numpy as np
 import torch
 from PIL import Image
 
-from hy3dgen.texgen.differentiable_renderer.mesh_render import MeshRender
-from hy3dgen.texgen.utils.dehighlight_utils import Light_Shadow_Remover
-from hy3dgen.texgen.utils.multiview_utils import Multiview_Diffusion_Net
-from hy3dgen.texgen.utils.uv_warp_utils import mesh_uv_wrap
+from tencent_hy3dgen.texgen.differentiable_renderer.mesh_render import MeshRender
+from tencent_hy3dgen.texgen.utils.dehighlight_utils import Light_Shadow_Remover
+from tencent_hy3dgen.texgen.utils.multiview_utils import Multiview_Diffusion_Net
+from tencent_hy3dgen.texgen.utils.uv_warp_utils import mesh_uv_wrap
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +309,7 @@ class LowVram3DPaintPipeline:
     def from_pretrained(cls, model_path: str, subfolder: str = 'hunyuan3d-paint-v2-0-turbo'):
         original_model_path = model_path
         if not os.path.exists(model_path):
-            base_dir = os.environ.get('HY3DGEN_MODELS', '~/.cache/hy3dgen')
+            base_dir = os.environ.get('HY3DGEN_MODELS', '~/.cache/tencent_hy3dgen')
             model_path = os.path.expanduser(os.path.join(base_dir, model_path))
             delight_model_path = os.path.join(model_path, 'hunyuan3d-delight-v2-0')
             multiview_model_path = os.path.join(model_path, subfolder)
