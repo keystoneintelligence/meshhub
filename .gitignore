@@ -7,3 +7,7 @@
 *docs/*
 *.glb
 *.png
+*.egg-info
+*.pyd
+*cpython-*
+*_bck.py
