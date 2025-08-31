@@ -21,8 +21,17 @@ python -m venv venv
 venv\Scripts\activate      # Windows
 source venv/bin/activate   # macOS/Linux
 
+# set the following envvars
+set CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4
+set PATH=%CUDA_HOME%\bin;%CUDA_HOME%\libnvvp;%PATH%
+set TORCH_CUDA_ARCH_LIST=6.1
+
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-cuda.txt
+
+set PIP_FLAGS=--no-build-isolation --config-settings editable_mode=compat
+
+python -m pip install -e .
 
 # Build the executable
 pyinstaller main.spec
