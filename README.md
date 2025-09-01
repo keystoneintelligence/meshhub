@@ -1,4 +1,4 @@
-# <img src="gui/favicon.png" alt="MeshHub Icon" width="24" /> MeshHub
+# <img src="gui/favicon.png" alt="MeshHub Icon" width="36" /> MeshHub
 
 
 AI-powered 3D model creation and editing suite. MeshHub unifies open-source 3D generation, texturing, and editing tools into one cohesive, local-first workflow—ideal for game assets, prototyping, animation, and creative exploration.
@@ -74,7 +74,7 @@ Yes—see the LICENSE for details.
 
 ## 🌐 Links
 
-- [<img src="gui/favicon.png" alt="MeshHub Icon" width="24" /> MeshHub Website](https://www.keystoneintelligence.ai/mapmosaic)
+- [<img src="gui/favicon.png" alt="MeshHub Icon" width="24" /> MeshHub Website](https://www.keystoneintelligence.ai/meshhub)
 
 ---
 
