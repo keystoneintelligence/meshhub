@@ -31,7 +31,10 @@ def _get_pipeline(device: str = None):
             variant="fp16",
         )
         print(f"[DEBUG] Pipeline loaded on {device}")
-        _pipeline.enable_flashvdm()
+        if os.environ.get("MESHHUB_ENABLE_FLASHVDM", "1") != "0":
+            _pipeline.enable_flashvdm()
+        else:
+            print("[DEBUG] FlashVDM disabled; using standard volume decoder")
     return _pipeline
 
 def _extract_mesh(out) -> trimesh.Trimesh:

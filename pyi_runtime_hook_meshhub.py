@@ -14,10 +14,13 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
 os.environ.setdefault("TORCHINDUCTOR_DISABLE", "1")
 os.environ.setdefault("AOT_INDUCTOR_ENABLE", "0")
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+os.environ.setdefault("MESHHUB_ENABLE_FLASHVDM", "0")
 
 local_appdata = os.environ.get("LOCALAPPDATA", "")
 if local_appdata:
-    os.environ.setdefault("HF_HOME", os.path.join(local_appdata, "hf-cache"))
+    hf_home = os.environ.setdefault("HF_HOME", os.path.join(local_appdata, "hf-cache"))
+    os.environ.setdefault("HF_MODULES_CACHE", os.path.join(hf_home, "modules"))
 os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 # --------------- CUDA DLL search path (Windows) -----------

@@ -165,7 +165,7 @@ class GenerateWidget(QWidget):
         else:
             self.model_selector.addItems([m.value for m in TextTo3DModelOption])
         self.texture_selector.clear()
-        self.texture_selector.addItems([t.value for t in TextureModelOption])
+        self.texture_selector.addItems(["None"] + [t.value for t in TextureModelOption])
 
     def _pick_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg)")
@@ -190,6 +190,7 @@ class GenerateWidget(QWidget):
             run_folder = os.path.join(base_folder, datetime.now().strftime("%Y%m%d_%H%M%S"))
             os.makedirs(run_folder, exist_ok=True)
 
+            texture_model = self.texture_selector.currentText()
             output_path = generate(
                 model=self.model_selector.currentText(),
                 mode=self.mode_selector.currentText(),
@@ -197,7 +198,7 @@ class GenerateWidget(QWidget):
                 output_folder=run_folder,
                 image_path=getattr(self, 'selected_image', None),
                 text_prompt=self.text_input.text(),
-                texture_model=self.texture_selector.currentText()
+                texture_model=None if texture_model == "None" else texture_model
             )
             self.viewer_orbit.load_model(output_path, reset=True)
             # Ensure we are in orbit mode after generating
