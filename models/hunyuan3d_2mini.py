@@ -19,7 +19,7 @@ _pipeline = None
 def get_default_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
-def _get_pipeline(device: str = None):
+def _get_pipeline(device: str | None = None):
     global _pipeline
     if _pipeline is None:
         device = device or get_default_device()
@@ -53,7 +53,11 @@ def _extract_mesh(out) -> trimesh.Trimesh:
 
     raise TypeError(f"Unrecognized pipeline output type: {type(out)}")
 
-def generate_text_to_3d_hunyuan3d_2mini(prompt: str, requested_faces: int, output_path: str = None) -> str:
+def generate_text_to_3d_hunyuan3d_2mini(
+    prompt: str,
+    requested_faces: int,
+    output_path: str | None = None,
+) -> tuple[str, str]:
     pipeline_t2i = HunyuanDiTPipeline(
         'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
         device=get_default_device()
@@ -63,10 +67,17 @@ def generate_text_to_3d_hunyuan3d_2mini(prompt: str, requested_faces: int, outpu
     gen_img_outpath = os.path.join(output_path, "t2i.png")
     image.save(gen_img_outpath)
     print(f"Saved {gen_img_outpath}")
-    return generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path), gen_img_outpath
+    return (
+        generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path),
+        gen_img_outpath,
+    )
     
 
-def generate_image_to_3d_hunyuan3d_2mini(image_path: str, requested_faces: int, output_path: str = None) -> str:
+def generate_image_to_3d_hunyuan3d_2mini(
+    image_path: str,
+    requested_faces: int,
+    output_path: str | None = None,
+) -> str:
     #return "treasurechest_3d.glb"
     pipeline = _get_pipeline()
     img = Image.open(image_path).convert("RGBA")

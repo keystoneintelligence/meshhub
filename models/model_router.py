@@ -37,7 +37,7 @@ def generate(
     texture_model: Optional[str] = None,
 ) -> str:
     """
-    Route request to the appropriate 3D generation function based on mode, model, and apply texture.
+    Route request to the appropriate 3D generation function.
     :param model: Name of the base 3D model generator (must match enums)
     :param mode: Either 'image to 3d' or 'text to 3d'
     :param image_path: Path to input image if using image-to-3D
@@ -59,10 +59,11 @@ def generate(
             raise ValueError(f"Unknown image-to-3D model: {model!r}. Valid options are: {valid}")
 
         if model_option is ImageTo3DModelOption.HUNYUAN3D2MINI:
-            base_model_path = generate_image_to_3d_hunyuan3d_2mini(image_path, requested_faces, output_folder)
-        elif model_option is ImageTo3DModelOption.TRELLIS:
-            # base_model_path = generate_image_to_3d_trellis(image_path)
-            base_model_path = None  # placeholder
+            base_model_path = generate_image_to_3d_hunyuan3d_2mini(
+                image_path,
+                requested_faces,
+                output_folder,
+            )
         else:
             raise ValueError(f"Bad case {model_option}")
 
@@ -77,17 +78,16 @@ def generate(
             raise ValueError(f"Unknown text-to-3D model: {model!r}. Valid options are: {valid}")
 
         if model_option is TextTo3DModelOption.HUNYUAN3D2MINI:
-            base_model_path, image_path = generate_text_to_3d_hunyuan3d_2mini(text_prompt, requested_faces, output_folder)
-        elif model_option is TextTo3DModelOption.TRELLIS:
-            # base_model_path = generate_text_to_3d_trellis(text_prompt)
-            base_model_path = None  # placeholder
+            base_model_path, image_path = generate_text_to_3d_hunyuan3d_2mini(
+                text_prompt,
+                requested_faces,
+                output_folder,
+            )
         else:
             raise ValueError(f"Bad case {model_option}")
 
     else:
-        raise ValueError(
-            f"Unsupported mode: {mode!r}. Use 'image to 3d' or 'text to 3d'."
-        )
+        raise ValueError(f"Unsupported mode: {mode!r}. Use 'image to 3d' or 'text to 3d'.")
 
     if base_model_path is None:
         raise RuntimeError("Model generation returned no path.")
@@ -98,9 +98,13 @@ def generate(
             texture_option = TextureModelOption(texture_model)
         except ValueError:
             valid = ", ".join([opt.value for opt in TextureModelOption])
-            raise ValueError(f"Unknown texture model: {texture_model!r}. Valid options are: {valid}")
-        
+            raise ValueError(
+                f"Unknown texture model: {texture_model!r}. Valid options are: {valid}"
+            )
+
         if texture_option is TextureModelOption.HUNYUAN3D2MINILOWVRAM:
+            if image_path is None:
+                raise RuntimeError("Texture generation requires an image path.")
             textured_model_path = apply_texture_to_model(base_model_path, image_path)
             return textured_model_path
 
