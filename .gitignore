@@ -11,3 +11,7 @@
 *.pyd
 *cpython-*
 *_bck.py
+venv
+dist
+build
+images
