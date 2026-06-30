@@ -48,6 +48,8 @@ Setup
 see BUILD.md
 ```
 
+`BUILD.md` documents the current PyInstaller one-file distributable, packaged CLI smoke tests, and Hugging Face model-cache management.
+
 ---
 
 ## 🚧 Roadmap
