@@ -39,7 +39,7 @@ The current spec builds a one-file executable:
 dist\meshhub.exe
 ```
 
-Do not distribute the stale one-folder build at `dist\meshhub\meshhub.exe` unless you also include its `_internal` folder. The one-file executable still extracts its bundled runtime to a temporary directory on startup, so first launch can be slow.
+The one-file executable extracts its bundled runtime to a temporary directory on startup, so first launch can be slow.
 
 ## Model Cache
 
