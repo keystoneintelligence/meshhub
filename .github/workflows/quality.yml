@@ -1,0 +1,37 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality:
+    name: Black, Pyright, and pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Check formatting
+        run: python -m black --check models/hf_model_manager.py models/model_router.py tests
+
+      - name: Type check
+        run: python -m pyright
+
+      - name: Run tests
+        env:
+          MESHHUB_SKIP_PRESTEPS: "1"
+        run: python -m pytest
