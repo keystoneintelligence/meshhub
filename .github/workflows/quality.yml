@@ -26,7 +26,7 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Check formatting
-        run: python -m black --check models/hf_model_manager.py models/model_router.py tests
+        run: python -m black --check models/generation_jobs.py models/gpu_preflight.py models/hf_model_manager.py models/model_router.py models/run_manifest.py tests
 
       - name: Type check
         run: python -m pyright

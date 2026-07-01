@@ -4,17 +4,27 @@ import shutil
 import logging
 from datetime import datetime
 
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton,
-    QComboBox, QLineEdit, QFileDialog, QHBoxLayout, QCheckBox, QStackedWidget, QSpinBox
+    QComboBox, QLineEdit, QFileDialog, QHBoxLayout, QCheckBox, QStackedWidget, QSpinBox,
+    QProgressBar, QTextEdit,
 )
 
+from gui.generation_worker import GenerationTaskWorker
 from models.model_router import (
     generate,
     TextTo3DModelOption,
     ImageTo3DModelOption,
     TextureModelOption,
     TextureInpaintModelOption,
+)
+from models.generation_jobs import (
+    GenerationJobQueue,
+    GenerationJobResult,
+    GenerationProgress,
+    GenerationRequest,
+    GenerationStatus,
 )
 from gui.orbit_viewer import OrbitViewer
 from gui.texture_edit_viewer import TextureEditViewer
@@ -30,7 +40,11 @@ class GenerateWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.last_model_path = None
-        self._is_generating = False
+        self._job_queue = GenerationJobQueue()
+        self._active_thread = None
+        self._active_worker = None
+        self._last_retry_request = None
+        self._last_retry_parent_job_id = None
 
         # --- Top-level layout ---
         self._root_layout = QVBoxLayout(self)
@@ -81,12 +95,37 @@ class GenerateWidget(QWidget):
         btn_layout = QHBoxLayout()
         self.generate_btn = QPushButton("Generate")
         self.generate_btn.clicked.connect(self._on_generate)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._on_cancel_generation)
+        self.retry_btn = QPushButton("Retry")
+        self.retry_btn.setEnabled(False)
+        self.retry_btn.clicked.connect(self._on_retry_generation)
         self.export_btn = QPushButton("Export Model")
         self.export_btn.setEnabled(False)
         self.export_btn.clicked.connect(self._on_export)
         btn_layout.addWidget(self.generate_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.retry_btn)
         btn_layout.addWidget(self.export_btn)
         self._root_layout.addLayout(btn_layout)
+
+        status_layout = QHBoxLayout()
+        self.status_label = QLabel("Idle")
+        self.queue_label = QLabel("Queue: 0 pending")
+        status_layout.addWidget(self.status_label, stretch=1)
+        status_layout.addWidget(self.queue_label)
+        self._root_layout.addLayout(status_layout)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self._root_layout.addWidget(self.progress_bar)
+
+        self.generation_log = QTextEdit()
+        self.generation_log.setReadOnly(True)
+        self.generation_log.setMaximumHeight(120)
+        self._root_layout.addWidget(self.generation_log)
 
         self._root_layout.addWidget(QLabel("Preview:"))
 
@@ -173,7 +212,7 @@ class GenerateWidget(QWidget):
             self.image_btn.setText(os.path.basename(path))
             self.selected_image = path
 
-    def _on_generate(self):
+    def _on_generate_legacy_sync(self):
         # Prevent re-entrancy and queuing while a generation is in progress
         if self._is_generating:
             logging.info("Generate ignored: a generation is already running.")
@@ -211,6 +250,152 @@ class GenerateWidget(QWidget):
             self._is_generating = False
             self.generate_btn.setEnabled(True)
             self.generate_btn.setText("Generate")
+
+    def _on_generate(self):
+        request = self._build_generation_request()
+        job = self._job_queue.submit(request)
+        self.retry_btn.setEnabled(False)
+        self._log_generation("info", f"Queued generation job {job.job_id}.", "queue")
+        self._update_queue_label()
+        if self._active_thread is None:
+            self._start_next_generation_job()
+
+    def _build_generation_request(self) -> GenerationRequest:
+        base_folder = self.output_edit.text().strip() or os.path.join(".", "output")
+        os.makedirs(base_folder, exist_ok=True)
+        run_folder = self._make_run_folder(base_folder)
+
+        texture_model = self.texture_selector.currentText()
+        return GenerationRequest(
+            model=self.model_selector.currentText(),
+            mode=self.mode_selector.currentText(),
+            requested_faces=self.faces_input.value(),
+            output_folder=run_folder,
+            image_path=getattr(self, 'selected_image', None),
+            text_prompt=self.text_input.text(),
+            texture_model=None if texture_model == "None" else texture_model,
+            seed=42,
+            parameters={
+                "source": "gui",
+                "target_faces": self.faces_input.value(),
+            },
+        )
+
+    def _make_run_folder(self, base_folder: str) -> str:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        candidate = os.path.join(base_folder, stamp)
+        suffix = 1
+        while os.path.exists(candidate):
+            candidate = os.path.join(base_folder, f"{stamp}_{suffix:02d}")
+            suffix += 1
+        os.makedirs(candidate, exist_ok=True)
+        return candidate
+
+    def _start_next_generation_job(self):
+        if self._active_thread is not None:
+            return
+        job = self._job_queue.start_next()
+        if job is None:
+            self._set_generation_running(False)
+            self._update_queue_label()
+            return
+
+        self._set_generation_running(True)
+        self.retry_btn.setEnabled(False)
+        self._update_queue_label()
+        self.progress_bar.setValue(0)
+        self.status_label.setText("Starting generation...")
+
+        self._active_thread = QThread(self)
+        self._active_worker = GenerationTaskWorker(job)
+        self._active_worker.moveToThread(self._active_thread)
+        self._active_thread.started.connect(self._active_worker.run)
+        self._active_worker.progress.connect(self._on_generation_progress)
+        self._active_worker.log.connect(self._on_generation_log)
+        self._active_worker.finished.connect(self._on_generation_finished)
+        self._active_worker.finished.connect(self._active_thread.quit)
+        self._active_worker.finished.connect(self._active_worker.deleteLater)
+        self._active_thread.finished.connect(self._active_thread.deleteLater)
+        self._active_thread.finished.connect(self._on_generation_thread_finished)
+        self._active_thread.start()
+
+    def _on_cancel_generation(self):
+        job = self._job_queue.running_job
+        if job is None:
+            return
+        self._job_queue.cancel(job.job_id)
+        self.cancel_btn.setEnabled(False)
+        self.status_label.setText("Cancellation requested...")
+        self._log_generation(
+            "warning",
+            "Cancellation requested. The current model step may need to finish first.",
+            "cancel",
+        )
+
+    def _on_retry_generation(self):
+        if self._last_retry_request is None or self._last_retry_parent_job_id is None:
+            return
+        base_folder = self.output_edit.text().strip() or os.path.join(".", "output")
+        os.makedirs(base_folder, exist_ok=True)
+        request = self._last_retry_request.for_retry(
+            output_folder=self._make_run_folder(base_folder),
+            parent_job_id=self._last_retry_parent_job_id,
+        )
+        job = self._job_queue.submit(request)
+        self.retry_btn.setEnabled(False)
+        self._log_generation("info", f"Queued retry job {job.job_id}.", "retry")
+        self._update_queue_label()
+        if self._active_thread is None:
+            self._start_next_generation_job()
+
+    def _on_generation_progress(self, progress: GenerationProgress):
+        self.progress_bar.setValue(progress.percent)
+        self.status_label.setText(progress.message)
+
+    def _on_generation_log(self, level: str, message: str, stage):
+        self._log_generation(level, message, stage)
+
+    def _on_generation_finished(self, result: GenerationJobResult):
+        running_job = self._job_queue.running_job
+        if running_job is not None:
+            self._last_retry_request = running_job.request
+            self._last_retry_parent_job_id = running_job.job_id
+        self._job_queue.finish_running(result)
+
+        self.retry_btn.setEnabled(self._last_retry_request is not None)
+        if result.status is GenerationStatus.SUCCEEDED and result.output_path:
+            self.viewer_orbit.load_model(result.output_path, reset=True)
+            if self.viewer_stack.currentIndex() != 0:
+                self._switch_to_orbit(preserve_camera=False)
+            self.status_label.setText(f"Completed. Manifest: {result.manifest_path}")
+        elif result.status is GenerationStatus.CANCELED:
+            self.status_label.setText(f"Canceled. Manifest: {result.manifest_path}")
+        else:
+            error_message = result.error["message"] if result.error else "Generation failed."
+            self.status_label.setText(f"Failed. Manifest: {result.manifest_path}")
+            logging.error(error_message)
+
+    def _on_generation_thread_finished(self):
+        self._active_thread = None
+        self._active_worker = None
+        if self._job_queue.pending_count:
+            self._start_next_generation_job()
+        else:
+            self._set_generation_running(False)
+            self._update_queue_label()
+
+    def _set_generation_running(self, running: bool):
+        self.generate_btn.setText("Queue Generate" if running else "Generate")
+        self.cancel_btn.setEnabled(running)
+
+    def _update_queue_label(self):
+        self.queue_label.setText(f"Queue: {self._job_queue.pending_count} pending")
+
+    def _log_generation(self, level: str, message: str, stage=None):
+        prefix = f"[{level.upper()}]"
+        if stage:
+            prefix += f"[{stage}]"
+        self.generation_log.append(f"{prefix} {message}")
 
     def _on_export(self):
         if not self.last_model_path:

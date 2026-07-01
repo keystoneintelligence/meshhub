@@ -35,6 +35,7 @@ def generate(
     image_path: Optional[str] = None,
     text_prompt: Optional[str] = None,
     texture_model: Optional[str] = None,
+    seed: int = 42,
 ) -> str:
     """
     Route request to the appropriate 3D generation function.
@@ -63,6 +64,7 @@ def generate(
                 image_path,
                 requested_faces,
                 output_folder,
+                seed=seed,
             )
         else:
             raise ValueError(f"Bad case {model_option}")
@@ -82,6 +84,7 @@ def generate(
                 text_prompt,
                 requested_faces,
                 output_folder,
+                seed=seed,
             )
         else:
             raise ValueError(f"Bad case {model_option}")

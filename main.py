@@ -27,6 +27,7 @@ def _run_headless_generation(argv: list[str]) -> int:
     parser.add_argument("--prompt", help="Prompt for text-to-3D generation.")
     parser.add_argument("--output", default=os.path.join(".", "output", "packaged-smoke"))
     parser.add_argument("--faces", type=int, default=5000)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--texture",
         choices=("none", "Hunyuan3D-2mini-LowVram"),
@@ -61,6 +62,7 @@ def _run_headless_generation(argv: list[str]) -> int:
         image_path=image_path,
         text_prompt=text_prompt,
         texture_model=None if args.texture == "none" else args.texture,
+        seed=args.seed,
     )
     print(output_path)
     return 0

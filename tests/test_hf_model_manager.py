@@ -117,12 +117,12 @@ def router_with_fake_backend(monkeypatch):
     calls = []
     fake_backend = types.ModuleType("models.hunyuan3d_2mini")
 
-    def image_to_3d(image_path, requested_faces, output_folder):
-        calls.append(("image", image_path, requested_faces, output_folder))
+    def image_to_3d(image_path, requested_faces, output_folder, seed=42):
+        calls.append(("image", image_path, requested_faces, output_folder, seed))
         return str(Path(output_folder) / "image.glb")
 
-    def text_to_3d(text_prompt, requested_faces, output_folder):
-        calls.append(("text", text_prompt, requested_faces, output_folder))
+    def text_to_3d(text_prompt, requested_faces, output_folder, seed=42):
+        calls.append(("text", text_prompt, requested_faces, output_folder, seed))
         return str(Path(output_folder) / "text.glb"), str(Path(output_folder) / "prompt.png")
 
     def apply_texture(model_path, image_path):
@@ -153,7 +153,7 @@ def test_model_router_dispatches_image_to_3d(router_with_fake_backend, tmp_path)
     )
 
     assert result == str(tmp_path / "image.glb")
-    assert calls == [("image", "input.png", 7500, str(tmp_path))]
+    assert calls == [("image", "input.png", 7500, str(tmp_path), 42)]
 
 
 def test_model_router_dispatches_text_to_3d_with_texture(router_with_fake_backend, tmp_path):
@@ -166,11 +166,12 @@ def test_model_router_dispatches_text_to_3d_with_texture(router_with_fake_backen
         output_folder=str(tmp_path),
         text_prompt="a small robot",
         texture_model="Hunyuan3D-2mini-LowVram",
+        seed=99,
     )
 
     assert result == str(tmp_path / "text_textured.glb")
     assert calls == [
-        ("text", "a small robot", 5000, str(tmp_path)),
+        ("text", "a small robot", 5000, str(tmp_path), 99),
         ("texture", str(tmp_path / "text.glb"), str(tmp_path / "prompt.png")),
     ]
 
