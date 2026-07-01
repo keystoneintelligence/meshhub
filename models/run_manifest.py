@@ -66,7 +66,9 @@ def collect_run_artifacts(
     texture_files = {
         path
         for path in image_files
-        if any(part in str(path).lower() for part in ("texture", "tex", "mask", "metadata", "inpaint"))
+        if any(
+            part in str(path).lower() for part in ("texture", "tex", "mask", "metadata", "inpaint")
+        )
     }
     generated_images = image_files - texture_files
 

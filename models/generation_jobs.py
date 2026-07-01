@@ -209,7 +209,9 @@ class GenerationJob:
             recorder.set_hf_revisions(collect_hf_revisions(keys))
 
             if self.cancel_requested():
-                progress("cancel", 100, "Generation job canceled before model execution.", "warning")
+                progress(
+                    "cancel", 100, "Generation job canceled before model execution.", "warning"
+                )
                 return complete(GenerationStatus.CANCELED)
 
             current_stage = "generation"
@@ -228,7 +230,9 @@ class GenerationJob:
             recorder.set_timing("generation", (time.perf_counter() - t_stage) * 1000.0)
 
             if self.cancel_requested():
-                progress("cancel", 95, "Generation finished after cancellation was requested.", "warning")
+                progress(
+                    "cancel", 95, "Generation finished after cancellation was requested.", "warning"
+                )
                 return complete(GenerationStatus.CANCELED)
 
             progress("artifacts", 95, "Collecting output artifacts.")
@@ -308,7 +312,9 @@ class GenerationJobQueue:
 
     def retry(self, job_id: str, *, output_folder: str) -> GenerationJob:
         original = self._history[job_id]
-        return self.submit(original.request.for_retry(output_folder=output_folder, parent_job_id=job_id))
+        return self.submit(
+            original.request.for_retry(output_folder=output_folder, parent_job_id=job_id)
+        )
 
 
 def structured_error(exc: BaseException, *, stage: str) -> dict[str, Any]:

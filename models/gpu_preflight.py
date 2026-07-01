@@ -77,7 +77,9 @@ def run_gpu_preflight(
     cuda = getattr(torch_module, "cuda", None)
     cuda_available = bool(cuda and cuda.is_available())
     if not cuda_available:
-        message = "CUDA is not available; generation will use CPU if the selected backend supports it."
+        message = (
+            "CUDA is not available; generation will use CPU if the selected backend supports it."
+        )
         if require_cuda:
             errors.append(message)
         else:
