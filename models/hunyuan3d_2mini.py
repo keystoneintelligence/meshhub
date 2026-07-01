@@ -57,6 +57,7 @@ def generate_text_to_3d_hunyuan3d_2mini(
     prompt: str,
     requested_faces: int,
     output_path: str | None = None,
+    seed: int = 42,
 ) -> tuple[str, str]:
     pipeline_t2i = HunyuanDiTPipeline(
         'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
@@ -68,7 +69,7 @@ def generate_text_to_3d_hunyuan3d_2mini(
     image.save(gen_img_outpath)
     print(f"Saved {gen_img_outpath}")
     return (
-        generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path),
+        generate_image_to_3d_hunyuan3d_2mini(gen_img_outpath, requested_faces, output_path, seed=seed),
         gen_img_outpath,
     )
     
@@ -77,6 +78,7 @@ def generate_image_to_3d_hunyuan3d_2mini(
     image_path: str,
     requested_faces: int,
     output_path: str | None = None,
+    seed: int = 42,
 ) -> str:
     #return "treasurechest_3d.glb"
     pipeline = _get_pipeline()
@@ -85,7 +87,7 @@ def generate_image_to_3d_hunyuan3d_2mini(
         print(f"[DEBUG] Removing background from RGB image")
         img = BackgroundRemover()(img)
 
-    gen = torch.manual_seed(42)
+    gen = torch.manual_seed(seed)
     print(f"[DEBUG] Generating from image: {image_path}")
     raw = pipeline(
         image=img,

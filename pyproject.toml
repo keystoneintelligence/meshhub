@@ -7,8 +7,11 @@ skip-string-normalization = true
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
 include = [
+    "models/generation_jobs.py",
+    "models/gpu_preflight.py",
     "models/hf_model_manager.py",
     "models/model_router.py",
+    "models/run_manifest.py",
     "tests",
 ]
 exclude = [
