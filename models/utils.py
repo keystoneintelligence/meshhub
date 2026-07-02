@@ -1,17 +1,22 @@
-import trimesh
 import tempfile
-import pymeshlab
+from typing import Any
 
-def trimesh2pymeshlab(mesh: trimesh.Trimesh) -> pymeshlab.MeshSet:
+
+def trimesh2pymeshlab(mesh: Any) -> Any:
     """Convert a trimesh.Trimesh into a pymeshlab.MeshSet."""
+    import pymeshlab
+
     ms = pymeshlab.MeshSet()
     with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
         mesh.export(tmp.name)
         ms.load_new_mesh(tmp.name)
     return ms
 
-def pymeshlab2trimesh(ms: pymeshlab.MeshSet) -> trimesh.Trimesh:
+
+def pymeshlab2trimesh(ms: Any) -> Any:
     """Convert a pymeshlab.MeshSet back into a single trimesh.Trimesh."""
+    import trimesh
+
     with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
         ms.save_current_mesh(tmp.name)
         loaded = trimesh.load(tmp.name)
@@ -22,7 +27,8 @@ def pymeshlab2trimesh(ms: pymeshlab.MeshSet) -> trimesh.Trimesh:
         return combined
     return loaded
 
-def remove_degenerate_face(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+
+def remove_degenerate_face(mesh: Any) -> Any:
     """
     Remove degenerate (zero‐area/null) faces and any unreferenced vertices.
     
@@ -38,7 +44,8 @@ def remove_degenerate_face(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     ms.apply_filter("meshing_remove_unreferenced_vertices")
     return pymeshlab2trimesh(ms)
 
-def reduce_face(mesh: trimesh.Trimesh, max_facenum: int = 10000) -> trimesh.Trimesh:
+
+def reduce_face(mesh: Any, max_facenum: int = 10000) -> Any:
     """
     Simplify the mesh to at most `max_facenum` faces using quadric edge collapse.
     

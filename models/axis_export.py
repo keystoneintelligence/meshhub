@@ -2,9 +2,7 @@ import math
 import os
 import shutil
 from pathlib import Path
-
-import numpy as np
-import trimesh
+from typing import Any
 
 
 AXIS_VECTORS = {
@@ -37,7 +35,9 @@ def rotations_are_identity(
     )
 
 
-def build_axis_rotation_matrix(axis: str, degrees: float) -> np.ndarray:
+def build_axis_rotation_matrix(axis: str, degrees: float) -> Any:
+    import trimesh
+
     axis = normalize_axis(axis)
     radians = math.radians(float(degrees))
     return trimesh.transformations.rotation_matrix(radians, AXIS_VECTORS[axis])
@@ -48,8 +48,10 @@ def build_axis_rotations_matrix(
     x_degrees: float = 0.0,
     y_degrees: float = 0.0,
     z_degrees: float = 0.0,
-) -> np.ndarray:
+) -> Any:
     """Build a combined correction matrix applied in X, then Y, then Z order."""
+    import numpy as np
+
     matrix = np.eye(4)
     for axis, degrees in (
         ("X", x_degrees),
@@ -110,6 +112,8 @@ def export_model_with_axis_rotations(
         y_degrees=y_degrees,
         z_degrees=z_degrees,
     )
+    import trimesh
+
     loaded = trimesh.load(str(source), force="scene", process=False)
     loaded.apply_transform(transform)
 
