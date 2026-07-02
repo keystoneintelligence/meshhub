@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 import sys
-import types
 
 import pytest
 
@@ -112,32 +111,72 @@ def test_models_by_key_returns_known_models_in_requested_order():
     ]
 
 
+def test_provider_registry_exposes_capability_scoped_metadata():
+    from models.provider_registry import create_default_provider_registry
+    from models.providers import ProviderCapability
+
+    registry = create_default_provider_registry()
+    shape = registry.metadata("Hunyuan3D-2mini")
+    texture = registry.metadata("Hunyuan3D-2mini-LowVram")
+    inpaint = registry.metadata("stabilityai/stable-diffusion-2-inpainting")
+
+    assert shape.supports(ProviderCapability.IMAGE_TO_3D)
+    assert shape.supports(ProviderCapability.TEXT_TO_3D)
+    assert shape.model_keys_for(ProviderCapability.IMAGE_TO_3D) == ("shape_hunyuan3d_2mini",)
+    assert shape.model_keys_for(ProviderCapability.TEXT_TO_3D) == (
+        "shape_hunyuan3d_2mini",
+        "text_to_image_hunyuan_dit",
+    )
+    assert texture.model_keys_for(ProviderCapability.TEXTURE) == ("texture_hunyuan3d_2",)
+    assert inpaint.model_keys_for(ProviderCapability.TEXTURE_INPAINT) == (
+        "texture_inpaint_sd2",
+    )
+    assert texture.cache_plan.model_keys == ("texture_hunyuan3d_2",)
+
+
 @pytest.fixture
-def router_with_fake_backend(monkeypatch):
+def router_with_fake_backend():
+    from models.hunyuan3d_2mini import (
+        hunyuan3d_2mini_metadata,
+        hunyuan3d_2mini_texture_metadata,
+    )
+    from models.provider_registry import ProviderRegistry, set_default_provider_registry
+    from models.stable_diffusion_inpaint_provider import stable_diffusion_2_inpaint_metadata
+
     calls = []
-    fake_backend = types.ModuleType("models.hunyuan3d_2mini")
 
-    def image_to_3d(image_path, requested_faces, output_folder, seed=42):
-        calls.append(("image", image_path, requested_faces, output_folder, seed))
-        return str(Path(output_folder) / "image.glb")
+    class FakeShapeProvider:
+        def generate_image_to_3d(
+            self, image_path, requested_faces, output_folder, *, seed=42, parameters=None
+        ):
+            calls.append(("image", image_path, requested_faces, output_folder, seed))
+            return str(Path(output_folder) / "image.glb")
 
-    def text_to_3d(text_prompt, requested_faces, output_folder, seed=42):
-        calls.append(("text", text_prompt, requested_faces, output_folder, seed))
-        return str(Path(output_folder) / "text.glb"), str(Path(output_folder) / "prompt.png")
+        def generate_text_to_3d(
+            self, text_prompt, requested_faces, output_folder, *, seed=42, parameters=None
+        ):
+            calls.append(("text", text_prompt, requested_faces, output_folder, seed))
+            return str(Path(output_folder) / "text.glb"), str(Path(output_folder) / "prompt.png")
 
-    def apply_texture(model_path, image_path):
-        calls.append(("texture", model_path, image_path))
-        return model_path.replace(".glb", "_textured.glb")
+    class FakeTextureProvider:
+        def apply_texture(self, model_path, image_path, *, parameters=None):
+            calls.append(("texture", model_path, image_path))
+            return model_path.replace(".glb", "_textured.glb")
 
-    setattr(fake_backend, "generate_image_to_3d_hunyuan3d_2mini", image_to_3d)
-    setattr(fake_backend, "generate_text_to_3d_hunyuan3d_2mini", text_to_3d)
-    setattr(fake_backend, "apply_texture_to_model", apply_texture)
-    monkeypatch.setitem(sys.modules, "models.hunyuan3d_2mini", fake_backend)
+    class FakeInpaintProvider:
+        pass
+
+    registry = ProviderRegistry()
+    registry.register(hunyuan3d_2mini_metadata(), FakeShapeProvider)
+    registry.register(hunyuan3d_2mini_texture_metadata(), FakeTextureProvider)
+    registry.register(stable_diffusion_2_inpaint_metadata(), FakeInpaintProvider)
+    set_default_provider_registry(registry)
     sys.modules.pop("models.model_router", None)
 
     import models.model_router as router
 
     yield router, calls
+    set_default_provider_registry(None)
     sys.modules.pop("models.model_router", None)
 
 

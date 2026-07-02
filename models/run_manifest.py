@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from models.hf_model_manager import MANAGED_MODELS, model_status, models_by_key, repo_cache_dir
+from models.providers import ProviderCapability
 
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -129,16 +130,24 @@ def collect_hf_revisions(model_keys: Iterable[str]) -> list[dict[str, Any]]:
 def model_keys_for_generation_request(
     *, mode: str, model: str, texture_model: str | None = None
 ) -> list[str]:
+    from models.provider_registry import get_default_provider_registry
+
+    registry = get_default_provider_registry()
     keys: list[str] = []
-    if model == "Hunyuan3D-2mini":
-        keys.append("shape_hunyuan3d_2mini")
-    if mode.strip().lower() == "text to 3d":
-        keys.append("text_to_image_hunyuan_dit")
+    mode_key = mode.strip().lower().replace("-", " ")
+    if mode_key == "image to 3d":
+        keys.extend(registry.required_model_keys(model, ProviderCapability.IMAGE_TO_3D))
+    elif mode_key == "text to 3d":
+        keys.extend(registry.required_model_keys(model, ProviderCapability.TEXT_TO_3D))
     if texture_model:
-        keys.append("texture_hunyuan3d_2")
+        keys.extend(registry.required_model_keys(texture_model, ProviderCapability.TEXTURE))
 
     known_keys = {managed.key for managed in MANAGED_MODELS}
-    return [key for key in keys if key in known_keys]
+    deduped: list[str] = []
+    for key in keys:
+        if key in known_keys and key not in deduped:
+            deduped.append(key)
+    return deduped
 
 
 class RunManifestRecorder:

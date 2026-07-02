@@ -15,6 +15,11 @@ from gui.viewer_utils import (
     camera_state_get,
     camera_state_set,
 )
+from models.axis_export import (
+    build_axis_rotations_matrix,
+    normalize_axis,
+    rotations_are_identity,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -38,14 +43,17 @@ class OrbitViewer(QWidget):
         self.setAcceptDrops(True)  # belt & suspenders
 
         self._source_path: str | None = None
+        self._base_mesh: pv.PolyData | None = None
         self.mesh: pv.PolyData | None = None
         self.texture: pv.Texture | None = None
         self.actor = None
+        self._orientation_actors = []
 
         self._text_actor = None
 
         self._show_texture = True
         self._show_wire = False
+        self._orientation_degrees = {"X": 0.0, "Y": 0.0, "Z": 0.0}
 
         # Orbit / inertia
         self._rotating = False
@@ -71,9 +79,7 @@ class OrbitViewer(QWidget):
             poly = read_mesh_any(path)
             tex = extract_texture_from_gltf_or_glb(path)
             self._source_path = path
-            self.mesh = poly
-            self.texture = tex
-            self._render_current(reset=reset)
+            self.set_mesh_content(poly, tex, reset=reset)
             self.modelLoaded.emit(path, tex is not None)
         except Exception as e:
             logging.error(f"[OrbitViewer] Failed to load: {e}", exc_info=True)
@@ -83,10 +89,35 @@ class OrbitViewer(QWidget):
         logging.info("[OrbitViewer] Placeholder.")
         self._stop_inertia()
         self._source_path = None
-        self.mesh = placeholder_mesh()
-        self.texture = None
-        self._render_current(reset=reset)
+        self.set_mesh_content(placeholder_mesh(), None, reset=reset)
         self.modelLoaded.emit("", False)
+
+    def set_mesh_content(self, mesh: pv.PolyData, texture: pv.Texture | None, reset: bool = False):
+        self._base_mesh = mesh
+        self.texture = texture
+        self.mesh = self._make_oriented_mesh(mesh)
+        self._render_current(reset=reset)
+
+    def set_orientation_correction(
+        self,
+        axis: str | None = None,
+        degrees: float | None = None,
+        *,
+        x_degrees: float | None = None,
+        y_degrees: float | None = None,
+        z_degrees: float | None = None,
+    ):
+        if axis is not None:
+            self._orientation_degrees[normalize_axis(axis)] = float(degrees or 0.0)
+        if x_degrees is not None:
+            self._orientation_degrees["X"] = float(x_degrees)
+        if y_degrees is not None:
+            self._orientation_degrees["Y"] = float(y_degrees)
+        if z_degrees is not None:
+            self._orientation_degrees["Z"] = float(z_degrees)
+        if self._base_mesh is not None:
+            self.mesh = self._make_oriented_mesh(self._base_mesh)
+            self._render_current(reset=False)
 
     def set_show_texture(self, enabled: bool):
         self._show_texture = bool(enabled)
@@ -146,6 +177,23 @@ class OrbitViewer(QWidget):
     def current_has_texture(self) -> bool:
         return self.texture is not None
 
+    def _make_oriented_mesh(self, mesh: pv.PolyData) -> pv.PolyData:
+        if rotations_are_identity(
+            x_degrees=self._orientation_degrees["X"],
+            y_degrees=self._orientation_degrees["Y"],
+            z_degrees=self._orientation_degrees["Z"],
+        ):
+            return mesh
+
+        rotated = mesh.copy(deep=True)
+        matrix = build_axis_rotations_matrix(
+            x_degrees=self._orientation_degrees["X"],
+            y_degrees=self._orientation_degrees["Y"],
+            z_degrees=self._orientation_degrees["Z"],
+        )
+        rotated.transform(matrix, transform_all_input_vectors=True, inplace=True)
+        return rotated
+
     def _render_current(self, reset: bool):
         if self.actor is not None:
             try:
@@ -153,6 +201,7 @@ class OrbitViewer(QWidget):
             except Exception:
                 pass
             self.actor = None
+        self._clear_orientation_guide()
 
         tri_count = self.mesh.n_cells if self.mesh is not None else 0
 
@@ -175,6 +224,8 @@ class OrbitViewer(QWidget):
             except Exception:
                 pass
 
+            self._add_orientation_guide()
+
         if reset:
             self.plot.reset_camera()
             self.plot.set_viewup((0, 1, 0))
@@ -192,6 +243,102 @@ class OrbitViewer(QWidget):
             shadow=True
         )
         self.plot.render()
+
+    def _clear_orientation_guide(self):
+        for actor in self._orientation_actors:
+            try:
+                self.plot.remove_actor(actor, render=False)
+            except Exception:
+                pass
+        self._orientation_actors.clear()
+
+    def _add_orientation_guide(self):
+        if self.mesh is None:
+            return
+
+        center = np.array(self.mesh.center, dtype=float)
+        bounds = np.array(self.mesh.bounds, dtype=float)
+        extents = np.array(
+            [
+                bounds[1] - bounds[0],
+                bounds[3] - bounds[2],
+                bounds[5] - bounds[4],
+            ],
+            dtype=float,
+        )
+        max_extent = max(float(np.max(extents)), 1e-6)
+        axis_length = max_extent * 0.9
+        front_length = axis_length * 1.25
+        shaft_radius = max(axis_length * 0.015, 0.01)
+        tip_radius = max(axis_length * 0.045, 0.03)
+
+        axes = [
+            ("X", np.array([1.0, 0.0, 0.0]), "red", axis_length),
+            ("Y", np.array([0.0, 1.0, 0.0]), "lime", axis_length),
+            ("Z", np.array([0.0, 0.0, 1.0]), "dodgerblue", axis_length),
+        ]
+
+        label_points = []
+        label_text = []
+        for label, direction, color, length in axes:
+            arrow = pv.Arrow(
+                start=center,
+                direction=direction,
+                scale=length,
+                tip_length=0.28,
+                tip_radius=tip_radius,
+                shaft_radius=shaft_radius,
+            )
+            self._orientation_actors.append(
+                self.plot.add_mesh(
+                    arrow,
+                    color=color,
+                    lighting=False,
+                    pickable=False,
+                    render=False,
+                )
+            )
+            label_points.append(center + direction * (length * 1.08))
+            label_text.append(label)
+
+        front_direction = np.array([0.0, 0.0, 1.0])
+        front_arrow = pv.Arrow(
+            start=center,
+            direction=front_direction,
+            scale=front_length,
+            tip_length=0.35,
+            tip_radius=tip_radius * 1.65,
+            shaft_radius=shaft_radius * 1.8,
+        )
+        self._orientation_actors.append(
+            self.plot.add_mesh(
+                front_arrow,
+                color="yellow",
+                lighting=False,
+                pickable=False,
+                render=False,
+            )
+        )
+        label_points.append(center + front_direction * (front_length * 1.1))
+        label_text.append("FRONT +Z")
+
+        try:
+            labels = self.plot.add_point_labels(
+                np.array(label_points),
+                label_text,
+                font_size=14,
+                text_color="white",
+                point_color="white",
+                point_size=0,
+                show_points=False,
+                always_visible=True,
+                shape=None,
+                pickable=False,
+                render=False,
+            )
+            self._orientation_actors.append(labels)
+        except Exception:
+            logging.debug("[OrbitViewer] Orientation labels unavailable.", exc_info=True)
 
     def _apply_rotation(self, d_theta, d_phi):
         cam = self.plot.camera
