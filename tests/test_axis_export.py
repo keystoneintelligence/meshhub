@@ -1,6 +1,7 @@
-import numpy as np
 import pytest
-import trimesh
+
+np = pytest.importorskip("numpy")
+trimesh = pytest.importorskip("trimesh")
 
 from models.axis_export import (
     build_axis_rotation_matrix,
