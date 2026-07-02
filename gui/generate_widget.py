@@ -1,6 +1,5 @@
 # generate_widget.py
 import os
-import shutil
 import logging
 from datetime import datetime
 
@@ -8,7 +7,7 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QFileDialog, QHBoxLayout, QCheckBox, QStackedWidget, QSpinBox,
-    QProgressBar, QTextEdit,
+    QProgressBar, QTextEdit, QDoubleSpinBox, QMessageBox,
 )
 
 from gui.generation_worker import GenerationTaskWorker
@@ -28,6 +27,7 @@ from models.generation_jobs import (
 )
 from gui.orbit_viewer import OrbitViewer
 from gui.texture_edit_viewer import TextureEditViewer
+from models.axis_export import export_model_with_axis_rotations
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -138,6 +138,48 @@ class GenerateWidget(QWidget):
         opts_layout.addWidget(self.chk_wire)
         self._root_layout.addLayout(opts_layout)
 
+        export_rotation_layout = QHBoxLayout()
+        export_rotation_layout.setContentsMargins(0, 0, 0, 0)
+        export_rotation_layout.setSpacing(6)
+        export_rotation_layout.addWidget(QLabel("Export Rotation:"))
+
+        self.export_rotation_inputs = {}
+        self.export_rotation_step_degrees = 90.0
+        for axis in ("X", "Y", "Z"):
+            minus_btn = QPushButton(f"{axis} -")
+            plus_btn = QPushButton(f"{axis} +")
+            degrees_input = QDoubleSpinBox()
+            degrees_input.setRange(-360.0, 360.0)
+            degrees_input.setDecimals(1)
+            degrees_input.setSingleStep(5.0)
+            degrees_input.setSuffix(" deg")
+            degrees_input.setValue(0.0)
+            degrees_input.setMinimumWidth(92)
+
+            minus_btn.clicked.connect(
+                lambda _checked=False, current_axis=axis: self._nudge_export_rotation(
+                    current_axis,
+                    -self.export_rotation_step_degrees,
+                )
+            )
+            plus_btn.clicked.connect(
+                lambda _checked=False, current_axis=axis: self._nudge_export_rotation(
+                    current_axis,
+                    self.export_rotation_step_degrees,
+                )
+            )
+            degrees_input.valueChanged.connect(self._on_export_rotation_changed)
+
+            self.export_rotation_inputs[axis] = degrees_input
+            export_rotation_layout.addWidget(minus_btn)
+            export_rotation_layout.addWidget(degrees_input)
+            export_rotation_layout.addWidget(plus_btn)
+
+        self.export_rotation_reset_btn = QPushButton("Reset")
+        export_rotation_layout.addWidget(self.export_rotation_reset_btn)
+        export_rotation_layout.addStretch(1)
+        self._root_layout.addLayout(export_rotation_layout)
+
         # Edit Texture controls
         # Note: Apply button is created/destroyed dynamically in edit mode.
         edit_layout = QHBoxLayout()
@@ -186,6 +228,7 @@ class GenerateWidget(QWidget):
         self.chk_texture.toggled.connect(self.viewer_orbit.set_show_texture)
         self.chk_wire.toggled.connect(self.viewer_orbit.set_show_wireframe)
         self.btn_edit_texture.toggled.connect(self._on_toggle_edit_texture)
+        self.export_rotation_reset_btn.clicked.connect(self._reset_export_rotation)
 
         # Viewer -> UI
         self.viewer_orbit.modelLoaded.connect(self._on_model_loaded)
@@ -406,7 +449,40 @@ class GenerateWidget(QWidget):
             "3D Files (*.glb *.gltf *.obj *.stl)"
         )
         if dest:
-            shutil.copy(self.last_model_path, dest)
+            try:
+                rotations = self._export_rotation_values()
+                export_model_with_axis_rotations(
+                    self.last_model_path,
+                    dest,
+                    x_degrees=rotations["X"],
+                    y_degrees=rotations["Y"],
+                    z_degrees=rotations["Z"],
+                )
+            except Exception as exc:
+                logging.error(f"Error exporting model: {exc}", exc_info=True)
+                QMessageBox.critical(self, "Export Failed", str(exc))
+
+    def _on_export_rotation_changed(self, *_args):
+        rotations = self._export_rotation_values()
+        self.viewer_orbit.set_orientation_correction(
+            x_degrees=rotations["X"],
+            y_degrees=rotations["Y"],
+            z_degrees=rotations["Z"],
+        )
+
+    def _export_rotation_values(self) -> dict:
+        return {
+            axis: input_widget.value()
+            for axis, input_widget in self.export_rotation_inputs.items()
+        }
+
+    def _nudge_export_rotation(self, axis: str, delta_degrees: float):
+        input_widget = self.export_rotation_inputs[axis]
+        input_widget.setValue(input_widget.value() + delta_degrees)
+
+    def _reset_export_rotation(self):
+        for input_widget in self.export_rotation_inputs.values():
+            input_widget.setValue(0.0)
 
     # ----------------- Mode switching -----------------
     def _on_toggle_edit_texture(self, checked: bool):
@@ -483,9 +559,11 @@ class GenerateWidget(QWidget):
 
             # Move any updated mesh/texture back to orbit viewer
             if getattr(self.viewer_edit, "mesh", None) is not None:
-                self.viewer_orbit.mesh = self.viewer_edit.mesh
-                self.viewer_orbit.texture = self.viewer_edit.texture
-                self.viewer_orbit._render_current(reset=False)
+                self.viewer_orbit.set_mesh_content(
+                    self.viewer_edit.mesh,
+                    self.viewer_edit.texture,
+                    reset=False,
+                )
 
             if cam_state:
                 self.viewer_orbit.set_camera_state(cam_state)

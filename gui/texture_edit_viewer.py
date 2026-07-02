@@ -1,6 +1,8 @@
 # texture_edit_viewer.py
 import os
 import logging
+from typing import cast
+
 import numpy as np
 from PIL import Image
 
@@ -11,7 +13,6 @@ import pyvista as pv
 from pyvistaqt import QtInteractor
 
 import vtk
-from pipelines.texture_infill import inpaint_glb_texture
 from gui.viewer_utils import (
     camera_state_set,
     camera_state_get,
@@ -22,6 +23,8 @@ from gui.viewer_utils import (
     texture_to_numpy,       # NEW
     compose_green_preview,  # NEW
 )
+from models.provider_registry import get_default_provider_registry
+from models.providers import ProviderCapability, TextureInpaintProvider
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -344,7 +347,7 @@ class TextureEditViewer(QWidget):
         Implementation details:
         - Flips the mask vertically (UV space vs image space) before saving.
         - Saves as 8-bit L PNG to `output_dir/mask_filename`.
-        - Calls `inpaint_glb_texture` (from texture_infill.py), which handles
+        - Calls the configured texture-inpaint provider, which handles
           mask-to-texture resizing with NEAREST and embeds the new PNG into the GLB.
         """
         if self.buffer is None or self.buffer.size == 0:
@@ -363,12 +366,15 @@ class TextureEditViewer(QWidget):
         mask_path = os.path.join(output_dir, mask_filename)
         Image.fromarray(mask_to_save.astype(np.uint8), mode="L").save(mask_path)
 
-        # 3) Call the inpaint wrapper
-        out_path = inpaint_glb_texture(
-            glb_path=glb_path,
-            mask_path=mask_path,
-            output_dir=output_dir,
-            model_id=model_id,
+        # 3) Call the configured inpaint provider
+        provider = cast(
+            TextureInpaintProvider,
+            get_default_provider_registry().provider(model_id, ProviderCapability.TEXTURE_INPAINT),
+        )
+        out_path = provider.inpaint_texture(
+            glb_path,
+            mask_path,
+            output_dir,
             guidance_scale=guidance_scale,
             num_inference_steps=num_inference_steps,
         )
