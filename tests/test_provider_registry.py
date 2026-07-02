@@ -91,7 +91,9 @@ def make_metadata(
 
 
 def test_provider_metadata_filters_model_keys_by_capability():
-    metadata = make_metadata(capabilities=(ProviderCapability.IMAGE_TO_3D, ProviderCapability.TEXT_TO_3D))
+    metadata = make_metadata(
+        capabilities=(ProviderCapability.IMAGE_TO_3D, ProviderCapability.TEXT_TO_3D)
+    )
 
     assert metadata.model_keys_for(ProviderCapability.IMAGE_TO_3D) == (
         "shared_model",
@@ -145,7 +147,8 @@ def test_model_router_builds_dynamic_enums_from_registered_provider_metadata(tmp
         def generate_image_to_3d(
             self, image_path, requested_faces, output_folder, *, seed=42, parameters=None
         ):
-            return str(Path(output_folder) / f"{parameters['name']}.glb")
+            generation_parameters = parameters or {}
+            return str(Path(output_folder) / f"{generation_parameters['name']}.glb")
 
     registry = ProviderRegistry()
     registry.register(
@@ -242,7 +245,7 @@ def test_stable_diffusion_inpaint_provider_delegates_to_pipeline(monkeypatch, tm
         calls.append(kwargs)
         return str(tmp_path / "asset_inpainted.glb")
 
-    fake_module.inpaint_glb_texture = fake_inpaint_glb_texture
+    setattr(fake_module, "inpaint_glb_texture", fake_inpaint_glb_texture)
     monkeypatch.setitem(sys.modules, "pipelines.texture_infill", fake_module)
 
     result = StableDiffusion2TextureInpaintProvider().inpaint_texture(

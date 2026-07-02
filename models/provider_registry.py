@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, cast
 
 from models.providers import GenerationProvider, ProviderCapability, ProviderMetadata
 
 
-ProviderFactory = Callable[[], GenerationProvider]
+ProviderFactory = Callable[[], object]
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self._registrations: dict[str, ProviderRegistration] = {}
         self._aliases: dict[str, str] = {}
-        self._instances: dict[str, GenerationProvider] = {}
+        self._instances: dict[str, object] = {}
 
     def register(self, metadata: ProviderMetadata, factory: ProviderFactory) -> None:
         self._registrations[metadata.provider_id] = ProviderRegistration(metadata, factory)
@@ -40,7 +40,7 @@ class ProviderRegistry:
             raise KeyError(f"Provider {provider_id!r} does not support {capability.value!r}.")
         if canonical_id not in self._instances:
             self._instances[canonical_id] = self._registrations[canonical_id].factory()
-        return self._instances[canonical_id]
+        return cast(GenerationProvider, self._instances[canonical_id])
 
     def metadata_for(self, capability: ProviderCapability) -> list[ProviderMetadata]:
         return [

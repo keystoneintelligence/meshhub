@@ -128,9 +128,7 @@ def test_provider_registry_exposes_capability_scoped_metadata():
         "text_to_image_hunyuan_dit",
     )
     assert texture.model_keys_for(ProviderCapability.TEXTURE) == ("texture_hunyuan3d_2",)
-    assert inpaint.model_keys_for(ProviderCapability.TEXTURE_INPAINT) == (
-        "texture_inpaint_sd2",
-    )
+    assert inpaint.model_keys_for(ProviderCapability.TEXTURE_INPAINT) == ("texture_inpaint_sd2",)
     assert texture.cache_plan.model_keys == ("texture_hunyuan3d_2",)
 
 

@@ -23,7 +23,7 @@ def _option_enum(name: str, capability: ProviderCapability) -> Type[Enum]:
     for metadata in registry.metadata_for(capability):
         member = metadata.enum_member or _enum_member_name(metadata.provider_id)
         members[member] = metadata.provider_id
-    return Enum(name, members, type=str)
+    return cast(Type[Enum], Enum(name, members, type=str))
 
 
 def _enum_member_name(value: str) -> str:
