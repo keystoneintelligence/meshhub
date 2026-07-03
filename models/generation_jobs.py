@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from threading import Event
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from models.gpu_preflight import run_gpu_preflight
 from models.run_manifest import (
@@ -18,6 +18,7 @@ from models.run_manifest import (
     model_keys_for_generation_request,
     snapshot_artifact_files,
 )
+from models.workflow_graph import WorkflowGraph, WorkflowStageStatus
 
 
 class GenerationStatus(str, Enum):
@@ -141,11 +142,23 @@ class GenerationJob:
     ) -> GenerationJobResult:
         output_folder = Path(self.request.output_folder)
         output_folder.mkdir(parents=True, exist_ok=True)
+        workflow = WorkflowGraph.for_generation_request(
+            workflow_id=self.job_id,
+            mode=self.request.mode,
+            model=self.request.model,
+            requested_faces=self.request.requested_faces,
+            output_folder=self.request.output_folder,
+            text_prompt=self.request.text_prompt,
+            image_path=self.request.image_path,
+            texture_model=self.request.texture_model,
+            seed=self.request.seed,
+        )
         recorder = RunManifestRecorder(
             run_id=self.job_id,
             output_folder=output_folder,
             request=self.request.to_manifest_dict(),
         )
+        recorder.set_workflow(workflow.to_dict())
         start = time.perf_counter()
         output_path: str | None = None
         initial_files = snapshot_artifact_files(output_folder)
@@ -159,7 +172,21 @@ class GenerationJob:
                 log_callback(level, message, stage)
             recorder.add_log(level=level, message=message, stage=stage)
 
+        def update_workflow(
+            key: str,
+            status: WorkflowStageStatus,
+            *,
+            artifacts: Iterable[str] | None = None,
+            error: dict[str, Any] | None = None,
+        ) -> None:
+            nonlocal workflow
+            if not workflow.has_stage(key):
+                return
+            workflow = workflow.with_stage(key, status, artifacts=artifacts, error=error)
+            recorder.set_workflow(workflow.to_dict())
+
         def complete(status: GenerationStatus, error: dict[str, Any] | None = None):
+            nonlocal workflow
             duration_ms = (time.perf_counter() - start) * 1000.0
             artifacts = collect_run_artifacts(
                 output_folder,
@@ -168,6 +195,20 @@ class GenerationJob:
                 initial_files=initial_files,
             )
             recorder.set_artifacts(artifacts)
+            if status is GenerationStatus.SUCCEEDED:
+                workflow = workflow.with_completed_generation(
+                    output_path=output_path,
+                    run_artifacts=artifacts,
+                )
+            elif status is GenerationStatus.CANCELED:
+                active_stage = "mesh" if workflow.has_stage("mesh") else workflow.stages[0].key
+                workflow = workflow.with_stage(active_stage, WorkflowStageStatus.CANCELED)
+            elif error:
+                failed_stage = error.get("stage", current_stage)
+                if not workflow.has_stage(failed_stage):
+                    failed_stage = "mesh" if workflow.has_stage("mesh") else workflow.stages[0].key
+                workflow = workflow.with_failed_stage(failed_stage, error)
+            recorder.set_workflow(workflow.to_dict())
             recorder.mark_completed(status=status.value, duration_ms=duration_ms)
             self.status = status
             return GenerationJobResult(
@@ -181,6 +222,11 @@ class GenerationJob:
         try:
             self.status = GenerationStatus.RUNNING
             recorder.mark_started()
+            if workflow.has_stage("prompt"):
+                update_workflow("prompt", WorkflowStageStatus.SUCCEEDED)
+                update_workflow("image_candidates", WorkflowStageStatus.RUNNING)
+            else:
+                update_workflow("selected_image", WorkflowStageStatus.SUCCEEDED)
             progress("queued", 5, "Generation job started.")
 
             if self.cancel_requested():
@@ -215,6 +261,10 @@ class GenerationJob:
                 return complete(GenerationStatus.CANCELED)
 
             current_stage = "generation"
+            if workflow.has_stage("image_candidates"):
+                update_workflow("image_candidates", WorkflowStageStatus.SUCCEEDED)
+                update_workflow("selected_image", WorkflowStageStatus.SUCCEEDED)
+            update_workflow("mesh", WorkflowStageStatus.RUNNING)
             progress("generation", 25, "Running model generation.")
             t_stage = time.perf_counter()
             output_path = self.generator_fn(
@@ -228,6 +278,10 @@ class GenerationJob:
                 seed=self.request.seed,
             )
             recorder.set_timing("generation", (time.perf_counter() - t_stage) * 1000.0)
+            update_workflow("mesh", WorkflowStageStatus.SUCCEEDED)
+            update_workflow("cleanup", WorkflowStageStatus.SUCCEEDED)
+            if workflow.has_stage("texture"):
+                update_workflow("texture", WorkflowStageStatus.SUCCEEDED, artifacts=(output_path,))
 
             if self.cancel_requested():
                 progress(
@@ -309,6 +363,14 @@ class GenerationJobQueue:
                 job.cancel()
                 return True
         return False
+
+    def cancel_pending(self) -> int:
+        pending = list(self._pending)
+        self._pending.clear()
+        for job in pending:
+            job.cancel()
+            self._history[job.job_id] = job
+        return len(pending)
 
     def retry(self, job_id: str, *, output_folder: str) -> GenerationJob:
         original = self._history[job_id]
