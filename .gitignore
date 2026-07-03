@@ -1,6 +1,7 @@
 .env
 .coverage
 .coveragerc
+.black-cache/
 *__pycache__*
 /output/*
 *api.key*

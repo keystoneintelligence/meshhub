@@ -12,6 +12,7 @@ include = [
     "models/hf_model_manager.py",
     "models/model_router.py",
     "models/run_manifest.py",
+    "models/workflow_graph.py",
     "tests",
 ]
 exclude = [

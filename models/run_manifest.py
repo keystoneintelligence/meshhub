@@ -183,6 +183,7 @@ class RunManifestRecorder:
                 "texture_paths": [],
                 "final_model_path": None,
             },
+            "workflow": None,
             "timings_ms": {},
             "logs": [],
             "errors": [],
@@ -224,6 +225,10 @@ class RunManifestRecorder:
 
     def set_artifacts(self, artifacts: dict[str, Any]) -> None:
         self.data["artifacts"].update(artifacts)
+        self.write()
+
+    def set_workflow(self, workflow: dict[str, Any]) -> None:
+        self.data["workflow"] = workflow
         self.write()
 
     def add_error(self, error: dict[str, Any]) -> None:

@@ -101,6 +101,21 @@ def test_generation_job_writes_success_manifest(ok_preflight, tmp_path):
     assert manifest["artifacts"]["texture_paths"] == [
         str(Path("metadata") / "texture_final" / "texture.png")
     ]
+    assert manifest["workflow"]["label"] == "Generation"
+    assert [stage["key"] for stage in manifest["workflow"]["stages"]] == [
+        "selected_image",
+        "mesh",
+        "cleanup",
+        "texture",
+        "export",
+    ]
+    assert manifest["workflow"]["stages"][3]["status"] == "succeeded"
+    assert manifest["workflow"]["stages"][1]["artifacts"] == ["asset_textured.glb"]
+    assert manifest["workflow"]["stages"][3]["artifacts"] == [
+        str(Path("metadata") / "texture_final" / "texture.png"),
+        "asset_textured.glb",
+    ]
+    assert manifest["workflow"]["stages"][4]["status"] == "ready"
     assert manifest["errors"] == []
     assert manifest["timings_ms"]["preflight"] >= 0
     assert manifest["timings_ms"]["generation"] >= 0
@@ -124,6 +139,8 @@ def test_generation_job_writes_structured_generation_error(ok_preflight, tmp_pat
     assert manifest["status"] == "failed"
     assert manifest["errors"][0]["stage"] == "generation"
     assert "ValueError" in manifest["errors"][0]["traceback"]
+    assert manifest["workflow"]["label"] == "Generation"
+    assert any(stage["status"] == "failed" for stage in manifest["workflow"]["stages"])
 
 
 def test_generation_job_blocks_on_failed_preflight(monkeypatch, tmp_path):
@@ -207,6 +224,22 @@ def test_generation_queue_runs_in_order_cancels_pending_and_retries(ok_preflight
     assert retry.request.attempt == 2
     assert retry.request.parent_job_id == first.job_id
     assert calls == ["first", "retry"]
+
+
+def test_generation_queue_cancel_pending_removes_queued_jobs(ok_preflight, tmp_path):
+    queue = GenerationJobQueue(generator_fn=fake_generator)
+    first = queue.submit(request_for(tmp_path, output_name="first"))
+    second = queue.submit(request_for(tmp_path, output_name="second"))
+    third = queue.submit(request_for(tmp_path, output_name="third"))
+
+    running = queue.start_next()
+
+    assert running is first
+    assert queue.pending_count == 2
+    assert queue.cancel_pending() == 2
+    assert queue.pending_count == 0
+    assert second.cancel_requested() is True
+    assert third.cancel_requested() is True
 
 
 class FakeCuda:
